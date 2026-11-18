@@ -139,7 +139,12 @@ public struct LeftoverFinder: Sendable {
         ("Library/Application Scripts", .other),
         ("Library/Application Support/CrashReporter", .logs),
         ("Library/Logs/DiagnosticReports", .logs),
+        // Sentry's crash reporter keeps one folder per process name.
+        ("Library/Caches/SentryCrash", .caches),
     ]
+
+    /// Folders whose entries are named "<Process>_<timestamp>…" (crash and diagnostic reports).
+    static let reportDirectories: Set<String> = ["Library/Logs/DiagnosticReports", "Library/Application Support/CrashReporter"]
 
     static let systemDirectories: [(String, LeftoverCategory)] = [
         ("Library/Application Support", .appSupport),
@@ -158,6 +163,8 @@ public struct LeftoverFinder: Sendable {
     public func find(_ app: InstalledApp) throws -> UninstallPlan {
         let ids = app.allBundleIDs.map { $0.lowercased() }
         let names = app.names.map { $0.lowercased() }.filter { $0.count >= 4 && !Self.genericNames.contains($0) }
+        // Process names crash reports can start with; longest first so "App_Helper_…" credits the helper, not "App".
+        let reportNames = (app.names.filter { names.contains($0.lowercased()) } + app.helperNames).sorted { $0.count > $1.count }
         var leftovers: [Leftover] = []
         var launchPrograms: [String] = []
         var launchJobs: [LaunchJob] = []
@@ -250,10 +257,21 @@ public struct LeftoverFinder: Sendable {
                     let url = dir.appendingPathComponent(name)
                     // Sub-directories that are themselves scanned as a location are not leftovers.
                     if dirs.contains(where: { base.appendingPathComponent($0.0).path == url.path }) { continue }
+                    let plain = Self.stripExtensions(name).lowercased()
                     if Self.matchesIdentifier(name, ids: ids, teamID: app.teamID) {
                         leftovers.append(makeLeftover(url, category, matchedBy: "Bundle ID match", byName: false, label: nil, domain: nil))
-                    } else if names.contains(Self.stripExtensions(name).lowercased()) {
+                    } else if names.contains(plain) {
                         leftovers.append(makeLeftover(url, category, matchedBy: "Same name as the app", byName: true, label: nil, domain: nil))
+                    } else if let helper = app.helperNames.first(where: { $0.lowercased() == plain }) {
+                        leftovers.append(makeLeftover(url, category, matchedBy: "Same name as the app's helper \(helper)", byName: false, label: nil, domain: nil))
+                    } else if Self.reportDirectories.contains(relative),
+                              let process = reportNames.first(where: { plain.hasPrefix($0.lowercased() + "_") || plain.hasPrefix($0.lowercased() + "-") }) {
+                        leftovers.append(makeLeftover(url, category, matchedBy: "Crash report from \(process)", byName: false, label: nil, domain: nil))
+                    } else if let other = Self.otherVersionIdentifier(name, ids: ids, teamID: app.teamID) {
+                        var item = makeLeftover(url, category, matchedBy: "Another version of the app (\(other)) — leave it if that version is still installed",
+                                                byName: true, label: nil, domain: nil)
+                        item.selectedByDefault = false
+                        leftovers.append(item)
                     }
                 }
             }
@@ -313,6 +331,13 @@ public struct LeftoverFinder: Sendable {
     /// True if a file/folder name refers to one of the app's bundle IDs, e.g. `com.x.App`, `com.x.App.plist`,
     /// `com.x.App.helper`, `TEAMID.com.x.App`, `group.com.x.App`, `com.x.App.<UUID>.plist` (ByHost).
     static func matchesIdentifier(_ name: String, ids: [String], teamID: String? = nil) -> Bool {
+        let n = normalizedIdentifier(name, teamID: teamID)
+        // Diagnostic reports are named "<Process>_<date>…"; handled by name matching instead.
+        return ids.contains { id in n == id || n.hasPrefix(id + ".") || n.hasPrefix(id + "_") || n.hasPrefix(id + "-") }
+    }
+
+    /// Lower-cased name without extensions, `group.` prefix or team-ID prefix.
+    static func normalizedIdentifier(_ name: String, teamID: String?) -> String {
         var n = stripExtensions(name).lowercased()
         if n.hasPrefix("group.") { n.removeFirst("group.".count) }
         if let teamID, n.hasPrefix(teamID.lowercased() + ".") {
@@ -324,8 +349,28 @@ public struct LeftoverFinder: Sendable {
             // Unknown team-ID prefix (10 alphanumerics with a digit).
             n = String(n[n.index(after: dot)...])
         }
-        // Diagnostic reports are named "<Process>_<date>…"; handled by name matching instead.
-        return ids.contains { id in n == id || n.hasPrefix(id + ".") || n.hasPrefix(id + "_") || n.hasPrefix(id + "-") }
+        return n
+    }
+
+    /// The other version's identifier when a name refers to a different major version of one of the app's
+    /// bundle IDs, e.g. `S8EX82NJP6.com.macpaw.CleanMyMac4` for `com.macpaw.CleanMyMac5`. Only IDs whose last
+    /// component ends in a version number after a letter qualify.
+    static func otherVersionIdentifier(_ name: String, ids: [String], teamID: String? = nil) -> String? {
+        let n = normalizedIdentifier(name, teamID: teamID)
+        for id in ids {
+            let digits = id.reversed().prefix { $0.isNumber }
+            guard !digits.isEmpty, digits.count <= 4 else { continue }
+            let base = String(id.dropLast(digits.count))
+            guard let last = base.last, last.isLetter, base.split(separator: ".").count >= 3, n.hasPrefix(base) else { continue }
+            let rest = n.dropFirst(base.count)
+            let otherDigits = rest.prefix { $0.isNumber }
+            guard !otherDigits.isEmpty, otherDigits.count <= 4, otherDigits != Substring(String(digits.reversed())) else { continue }
+            let after = rest.dropFirst(otherDigits.count)
+            if after.isEmpty || after.hasPrefix(".") || after.hasPrefix("_") || after.hasPrefix("-") {
+                return base + otherDigits
+            }
+        }
+        return nil
     }
 
     func isProtectedPath(_ path: String) -> Bool {

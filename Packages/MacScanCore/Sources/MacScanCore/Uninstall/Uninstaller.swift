@@ -189,7 +189,7 @@ public struct Uninstaller: Sendable {
                     if ok.contains(index) {
                         report.results.append((item, deleteFlags[index] ? .deleted : .movedToTrash))
                         if item.launchDomain == .system { report.stoppedLaunchItems.append(item.launchLabel ?? item.url.lastPathComponent) }
-                        logger.info("Uninstall (admin): moved to Trash \(item.path)")
+                        logger.info("Uninstall (admin): \(deleteFlags[index] ? "deleted permanently" : "moved to Trash") \(item.path)")
                     } else {
                         let why = failed.contains(index) ? "Could not be moved" : "Not processed"
                         report.results.append((item, .failed(why)))
@@ -217,7 +217,7 @@ public struct Uninstaller: Sendable {
                 report.notes.append("macOS keeps listing an app's background items in Login Items while the app is still in the Trash. Empty the Trash, or open the app under “In the Trash” in MacScan's Uninstall list and delete it permanently.")
             }
         }
-        logger.info("Uninstall \(plan.app.name) finished: \(report.movedCount) moved, \(report.failures.count) not moved")
+        logger.info("Uninstall \(plan.app.name) finished: \(report.movedCount) moved to Trash, \(report.deletedCount) deleted, \(report.failures.count) not removed")
         return report
     }
 

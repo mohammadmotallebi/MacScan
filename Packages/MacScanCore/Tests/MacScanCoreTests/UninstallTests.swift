@@ -398,3 +398,87 @@ final class RecordingAdminRunner: AdminRunner, @unchecked Sendable {
         #expect(s.text.contains("/bin/launchctl bootout 'system/com.x.daemon'"))
     }
 }
+
+/// Leftovers that apps like CleanMyMac leave under helper names, crash caches and older-version IDs.
+@Suite struct HelperAndVersionLeftoverTests {
+    /// Writes a bundle with the given executable name and bundle ID.
+    func makeBundle(_ url: URL, executable: String, id: String) throws {
+        let macos = url.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(atPath: "/usr/bin/true", toPath: macos.appendingPathComponent(executable).path)
+        let plist: [String: Any] = ["CFBundleExecutable": executable, "CFBundleIdentifier": id, "CFBundleName": executable, "CFBundlePackageType": "APPL"]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+            .write(to: url.appendingPathComponent("Contents/Info.plist"))
+    }
+
+    @Test func findsHelperNamedCrashAndOlderVersionLeftovers() throws {
+        let root = try TempDir()
+        let home = try TempDir()
+        let appURL = root.url.appendingPathComponent("Cleaner_5.app")
+        try makeBundle(appURL, executable: "Cleaner_5", id: "com.example.Cleaner5")
+        try makeBundle(appURL.appendingPathComponent("Contents/Library/LoginItems/Cleaner_5_Monitor.app"),
+                       executable: "Cleaner_5_Monitor", id: "com.example.Cleaner5.Monitor")
+        // A generic helper name that must not be used for matching.
+        try makeBundle(appURL.appendingPathComponent("Contents/XPCServices/Downloader.xpc"),
+                       executable: "Downloader", id: "com.example.Cleaner5.Downloader")
+        let app = try #require(InstalledApp.load(appURL))
+        #expect(app.helperNames == ["Cleaner_5_Monitor"])
+
+        // Should be found.
+        try home.write("Library/Application Support/Cleaner_5_Monitor/state", "x")
+        try home.write("Library/Caches/SentryCrash/Cleaner_5/report", "x")
+        try home.write("Library/Caches/SentryCrash/Cleaner_5_Monitor/report", "x")
+        try home.write("Library/Logs/DiagnosticReports/Cleaner_5_Monitor_2026-11-17-115729_MacBook-Pro.diag", "x")
+        try home.write("Library/Group Containers/ABCDE12345.com.example.Cleaner4/x", "x")
+        try home.write("Library/Application Scripts/ABCDE12345.com.example.Cleaner4/x", "x")
+        try root.write("Library/Logs/DiagnosticReports/Cleaner_5_2026-11-17-120000_MacBook-Pro.ips", "x")
+        // Look-alikes that must stay.
+        try home.write("Library/Caches/SentryCrash/OtherApp/report", "x")
+        try home.write("Library/Application Support/Downloader/x", "x")
+        try home.write("Library/Logs/DiagnosticReports/Cleaner_50_2026-11-17.diag", "x")
+        try home.write("Library/Logs/DiagnosticReports/OtherApp_2026-11-17.diag", "x")
+        try home.write("Library/Group Containers/ABCDE12345.com.example.CleanerPro/x", "x")
+        try home.write("Library/Group Containers/ABCDE12345.com.example.Cleaner45x/x", "x")
+
+        let finder = LeftoverFinder(locations: UninstallLocations(home: home.url, root: root.url, isRealSystem: false), backgroundItems: [])
+        let plan = try finder.find(app)
+        func rel(_ l: Leftover) -> String {
+            l.path.replacingOccurrences(of: home.url.path, with: "~").replacingOccurrences(of: root.url.path, with: "")
+        }
+        let found = Set(plan.leftovers.map(rel))
+        let expected: Set<String> = [
+            "/Cleaner_5.app",
+            "~/Library/Application Support/Cleaner_5_Monitor",
+            "~/Library/Caches/SentryCrash/Cleaner_5",
+            "~/Library/Caches/SentryCrash/Cleaner_5_Monitor",
+            "~/Library/Logs/DiagnosticReports/Cleaner_5_Monitor_2026-11-17-115729_MacBook-Pro.diag",
+            "~/Library/Group Containers/ABCDE12345.com.example.Cleaner4",
+            "~/Library/Application Scripts/ABCDE12345.com.example.Cleaner4",
+            "/Library/Logs/DiagnosticReports/Cleaner_5_2026-11-17-120000_MacBook-Pro.ips",
+        ]
+        #expect(found == expected, "missing: \(expected.subtracting(found)) extra: \(found.subtracting(expected))")
+
+        let report = try #require(plan.leftovers.first { $0.path.hasSuffix("Cleaner_5_Monitor_2026-11-17-115729_MacBook-Pro.diag") })
+        #expect(report.matchedBy == "Crash report from Cleaner_5_Monitor")
+
+        // Other-version items are shown but not ticked; everything else is ticked.
+        for item in plan.leftovers {
+            #expect(item.selectedByDefault == !rel(item).contains("Cleaner4"), "\(rel(item))")
+        }
+    }
+
+    @Test func otherVersionIdentifierRules() {
+        let ids = ["com.macpaw.cleanmymac5"]
+        #expect(LeftoverFinder.otherVersionIdentifier("S8EX82NJP6.com.macpaw.CleanMyMac4", ids: ids) == "com.macpaw.cleanmymac4")
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.CleanMyMac4.plist", ids: ids) == "com.macpaw.cleanmymac4")
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.CleanMyMac3.Helper", ids: ids) == "com.macpaw.cleanmymac3")
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.CleanMyMac5", ids: ids) == nil)        // same version
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.CleanMyMacX", ids: ids) == nil)
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.CleanMyMac4Pro", ids: ids) == nil)
+        #expect(LeftoverFinder.otherVersionIdentifier("com.macpaw.Gemini2", ids: ids) == nil)
+        // IDs without a trailing version, or a non-letter before it, never produce matches.
+        #expect(LeftoverFinder.otherVersionIdentifier("com.x.app2", ids: ["com.x.app"]) == nil)
+        #expect(LeftoverFinder.otherVersionIdentifier("com.x.app_2", ids: ["com.x.app_1"]) == nil)
+        #expect(LeftoverFinder.otherVersionIdentifier("x2", ids: ["x1"]) == nil)
+    }
+}

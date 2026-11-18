@@ -14,6 +14,9 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
     public let names: [String]
     /// Non-nil when MacScan refuses to uninstall this app.
     public let protectionReason: String?
+    /// Executable names of nested helpers that start with the app's name (e.g. `CleanMyMac_5_HealthMonitor`).
+    /// Helpers often create support folders, crash caches and crash reports under these names.
+    public var helperNames: [String] = []
 
     public var isProtected: Bool { protectionReason != nil }
 
@@ -44,8 +47,36 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
             teamID: CodeSigning.status(of: url).teamID,
             nestedBundleIDs: nestedIdentifiers(in: url, excluding: bundleID),
             names: names,
-            protectionReason: protection(for: url, bundleID: bundleID)
+            protectionReason: protection(for: url, bundleID: bundleID),
+            helperNames: helperNames(in: url, appNames: names)
         )
+    }
+
+    /// Executable names of nested helper bundles (login items, XPC services, helpers, extensions) and the
+    /// main executable, kept only when they start with one of the app's names. That prefix rule keeps generic
+    /// names such as "Autoupdate" or "Installer" out of name matching.
+    static func helperNames(in app: URL, appNames: [String]) -> [String] {
+        let contents = app.appendingPathComponent("Contents")
+        let prefixes = appNames.map { $0.lowercased() }.filter { $0.count >= 4 }
+        var candidates: [String] = []
+        if let main = Bundle(url: app)?.infoDictionary?["CFBundleExecutable"] as? String { candidates.append(main) }
+        let fm = FileManager.default
+        for place in ["Library/LoginItems", "Library/LaunchServices", "XPCServices", "PlugIns", "Helpers", "MacOS"] {
+            let dir = contents.appendingPathComponent(place)
+            for name in (try? fm.contentsOfDirectory(atPath: dir.path)) ?? [] {
+                let ext = (name as NSString).pathExtension.lowercased()
+                guard ["app", "xpc", "appex"].contains(ext) else { continue }
+                let nested = dir.appendingPathComponent(name)
+                candidates.append((Bundle(url: nested)?.infoDictionary?["CFBundleExecutable"] as? String)
+                                  ?? (name as NSString).deletingPathExtension)
+            }
+        }
+        var result: [String] = []
+        for c in candidates where !result.contains(c) && !appNames.contains(c) {
+            let lower = c.lowercased()
+            if prefixes.contains(where: { lower.hasPrefix($0) && lower.count > $0.count }) { result.append(c) }
+        }
+        return result
     }
 
     /// Identifiers of nested bundles (login items, helpers, XPC services, app extensions, plug-ins).
