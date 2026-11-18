@@ -208,7 +208,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "MacScan scans files in your Desktop folder for malware when you ask it to.";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "MacScan scans files in your Documents folder for malware when you ask it to.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "MacScan scans files in your Downloads folder for malware when you ask it to.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "MacScan scans files in your Downloads folder for malware when you ask it to, and scans new downloads if you turn that on.";
 				INFOPLIST_KEY_NSNetworkVolumesUsageDescription = "MacScan scans files on network volumes for malware when you ask it to.";
 				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "MacScan scans files on removable volumes for malware when you ask it to.";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -240,7 +240,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSDesktopFolderUsageDescription = "MacScan scans files in your Desktop folder for malware when you ask it to.";
 				INFOPLIST_KEY_NSDocumentsFolderUsageDescription = "MacScan scans files in your Documents folder for malware when you ask it to.";
-				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "MacScan scans files in your Downloads folder for malware when you ask it to.";
+				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "MacScan scans files in your Downloads folder for malware when you ask it to, and scans new downloads if you turn that on.";
 				INFOPLIST_KEY_NSNetworkVolumesUsageDescription = "MacScan scans files on network volumes for malware when you ask it to.";
 				INFOPLIST_KEY_NSRemovableVolumesUsageDescription = "MacScan scans files on removable volumes for malware when you ask it to.";
 				LD_RUNPATH_SEARCH_PATHS = (

@@ -36,7 +36,21 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     /// other users or the system can be read. (Privacy-protected folders still need Full Disk Access.)
     public var elevatedScans: Bool = false
 
+    /// Run a scan of Applications, Startup Items and the custom folders on a schedule (launchd starts
+    /// MacScan headless for the scan; nothing stays running in between).
+    public var scheduledScanEnabled: Bool = false
+    public var scheduleFrequency: ScheduleFrequency = .daily
+    /// 1 = Monday … 7 = Sunday. Used when the frequency is weekly.
+    public var scheduleWeekday: Int = 1
+    public var scheduleHour: Int = 12
+    public var scheduleMinute: Int = 0
+    /// Scan new items in ~/Downloads when they arrive (launchd starts MacScan when the folder changes).
+    public var watchDownloads: Bool = false
+
     public init() {}
+
+    /// True when any background (launchd-started) scan is turned on.
+    public var backgroundScansEnabled: Bool { scheduledScanEnabled || watchDownloads }
 
     public var maxFileSizeBytes: Int64 { Int64(max(1, maxFileSizeMB)) * 1024 * 1024 }
 
@@ -70,7 +84,21 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         useXProtectRules = try c.decodeIfPresent(Bool.self, forKey: .useXProtectRules) ?? d.useXProtectRules
         vtAutoLookupFlagged = try c.decodeIfPresent(Bool.self, forKey: .vtAutoLookupFlagged) ?? d.vtAutoLookupFlagged
         elevatedScans = try c.decodeIfPresent(Bool.self, forKey: .elevatedScans) ?? d.elevatedScans
+        scheduledScanEnabled = try c.decodeIfPresent(Bool.self, forKey: .scheduledScanEnabled) ?? d.scheduledScanEnabled
+        scheduleFrequency = try c.decodeIfPresent(ScheduleFrequency.self, forKey: .scheduleFrequency) ?? d.scheduleFrequency
+        scheduleWeekday = try c.decodeIfPresent(Int.self, forKey: .scheduleWeekday) ?? d.scheduleWeekday
+        scheduleHour = try c.decodeIfPresent(Int.self, forKey: .scheduleHour) ?? d.scheduleHour
+        scheduleMinute = try c.decodeIfPresent(Int.self, forKey: .scheduleMinute) ?? d.scheduleMinute
+        watchDownloads = try c.decodeIfPresent(Bool.self, forKey: .watchDownloads) ?? d.watchDownloads
     }
+}
+
+public enum ScheduleFrequency: String, Codable, CaseIterable, Sendable, Identifiable {
+    case daily
+    case weekly
+
+    public var id: String { rawValue }
+    public var title: String { self == .daily ? "Every day" : "Every week" }
 }
 
 public enum SettingsStore {

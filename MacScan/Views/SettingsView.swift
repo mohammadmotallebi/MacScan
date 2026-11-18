@@ -8,6 +8,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             EngineSettingsView()
                 .tabItem { Label("Engines", systemImage: "cpu") }
+            BackgroundSettingsView()
+                .tabItem { Label("Background", systemImage: "clock.arrow.circlepath") }
             VirusTotalSettingsView()
                 .tabItem { Label("VirusTotal", systemImage: "network") }
             PrivacySettingsView()
@@ -230,6 +232,88 @@ struct VirusTotalSettingsView: View {
     }
 }
 
+// MARK: - Background scans
+
+struct BackgroundSettingsView: View {
+    @Environment(AppState.self) private var state
+
+    /// 1 = Monday … 7 = Sunday, as stored in the settings.
+    private func weekdayName(_ day: Int) -> String {
+        Calendar.current.weekdaySymbols[day % 7]   // weekdaySymbols starts with Sunday
+    }
+
+    private var scheduleTime: Binding<Date> {
+        Binding {
+            Calendar.current.date(bySettingHour: state.settings.scheduleHour, minute: state.settings.scheduleMinute, second: 0, of: Date()) ?? Date()
+        } set: { date in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: date)
+            state.settings.scheduleHour = parts.hour ?? 12
+            state.settings.scheduleMinute = parts.minute ?? 0
+        }
+    }
+
+    var body: some View {
+        @Bindable var state = state
+        Form {
+            Section("Scheduled scan") {
+                Toggle("Scan on a schedule", isOn: $state.settings.scheduledScanEnabled)
+                if state.settings.scheduledScanEnabled {
+                    Picker("Repeat", selection: $state.settings.scheduleFrequency) {
+                        ForEach(ScheduleFrequency.allCases) { Text($0.title).tag($0) }
+                    }
+                    if state.settings.scheduleFrequency == .weekly {
+                        Picker("Day", selection: $state.settings.scheduleWeekday) {
+                            ForEach(1...7, id: \.self) { Text(weekdayName($0)).tag($0) }
+                        }
+                    }
+                    DatePicker("Time", selection: scheduleTime, displayedComponents: .hourAndMinute)
+                }
+                Text("Scans Applications, Startup Items and your scan folders. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Downloads") {
+                Toggle("Scan new downloads", isOn: $state.settings.watchDownloads)
+                Text("When something new arrives in your Downloads folder, MacScan scans just that item. Items that are already there are not scanned.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("Notifications") {
+                LabeledContent("Status") {
+                    switch state.notificationPermission {
+                    case .allowed: Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                    case .denied: Label("Turned off for MacScan", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    case .notAsked: Text("Not set up yet").foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Button("Send Test Notification") { state.sendTestNotification() }
+                        .disabled(state.testNotificationInFlight)
+                    if state.notificationPermission == .denied {
+                        Button("Open Notification Settings") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }
+                    }
+                }
+                Text("A notification appears only when a background scan finds something new. Every background scan is also saved in History. MacScan never moves or deletes anything on its own.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section("How it works") {
+                if let error = state.backgroundError {
+                    Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.callout)
+                    Button("Try Again") { state.syncBackgroundAgent() }
+                }
+                Text("macOS starts MacScan for each background scan and MacScan exits when the scan ends, so nothing stays running in between. While either option is on, MacScan appears in System Settings › General › Login Items and in its own Startup Items scan. Turning both off removes its launch agents. Background scans never run as administrator.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+}
+
 // MARK: - Privacy
 
 struct PrivacySettingsView: View {
@@ -260,8 +344,13 @@ struct PrivacySettingsView: View {
                 }
             }
             Section("Background activity") {
-                Text("MacScan has no launch agents, daemons, login items, menu bar helpers or extensions. When you quit it, every scan and helper process stops.")
-                    .font(.callout)
+                if state.settings.backgroundScansEnabled {
+                    Text("Background scans are on (Settings › Background). macOS starts MacScan for each scan through MacScan's own launch agent, and MacScan exits when the scan ends. Nothing else runs in the background: no daemons, menu bar helpers or extensions.")
+                        .font(.callout)
+                } else {
+                    Text("MacScan has no launch agents, daemons, login items, menu bar helpers or extensions. When you quit it, every scan and helper process stops. Scheduled scans and scanning new downloads are optional and off (Settings › Background).")
+                        .font(.callout)
+                }
             }
         }
         .formStyle(.grouped)

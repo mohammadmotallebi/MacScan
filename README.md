@@ -1,6 +1,6 @@
 # MacScan
 
-An **on-demand** malware scanner for your own Mac. It runs only when you open it and press a scan button. It has no launch agents, daemons, login items, menu bar helpers or system extensions. When you quit MacScan, every scan and helper process stops.
+An **on-demand** malware scanner for your own Mac. By default it runs only when you open it and press a scan button: no launch agents, daemons, login items, menu bar helpers or system extensions. When you quit MacScan, every scan and helper process stops. Scheduled scans and scanning new downloads are optional and off by default (see [Background scans](#background-scans)).
 
 - **ClamAV** signature scanning (via Homebrew's `clamscan`)
 - **YARA** rules (via Homebrew's `yara`): a small sample macOS ruleset, your own rules, and **Apple's XProtect rules** that ship with macOS
@@ -10,6 +10,7 @@ An **on-demand** malware scanner for your own Mac. It runs only when you open it
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
 - Results with severity filter, Reveal in Finder, Move to Trash (always asks first), Ignore
 - Scan history with JSON and CSV export
+- **Optional background scans**: a scheduled scan, and a scan of each new item in your Downloads folder, with a notification when something is found. macOS starts MacScan for each scan and MacScan exits afterwards, so nothing stays running.
 - **Complete uninstaller**: removes an app together with its startup items, helpers, settings, caches, containers, logs and package-installed files, after you review a checklist. Everything goes to the Trash.
 
 MacScan **never deletes or moves anything on its own.**
@@ -101,6 +102,7 @@ a result you've reviewed. It reappears if the file's contents change.
 | --- | --- |
 | General | Max file size, skip symlinks, "executables only" for Applications scans, excluded paths |
 | Engines | Turn engines on/off, paths to `clamscan`/`freshclam`/`yara`/`yarac`, ClamAV DB folder, YARA rules folder |
+| Background | Scheduled scan (daily or weekly, time), scan new downloads, notification status and test |
 | VirusTotal | Your API key (stored in the login Keychain), auto-lookup of flagged files |
 | Privacy | Full Disk Access status and instructions, log location |
 | Ignored | Review and un-ignore hidden results |
@@ -207,6 +209,34 @@ Login Items & Extensions **while the app is still in the Trash**. To make them d
 Whatever the list says, MacScan refuses to remove top-level or system locations (`/Applications`, `/Library`,
 `~/Library/…` roots, `/System`, `/usr`, …).
 
+### Background scans
+
+Both options are in *Settings › Background* and are off by default.
+
+- **Scan on a schedule** runs a scan of Applications, Startup Items and your scan folders every day or
+  every week at the time you pick.
+- **Scan new downloads** scans each new item that arrives in `~/Downloads`. Items that were already there
+  when you turned it on are not scanned, and unfinished downloads (`.crdownload`, `.download`, `.part`)
+  wait until they are complete.
+
+How it works: MacScan installs its own per-user launch agents in `~/Library/LaunchAgents`
+(`com.local.MacScan.scheduled-scan.plist`, `com.local.MacScan.downloads-watcher.plist`). launchd starts the
+MacScan executable in a headless mode (`--macscan-background-scan`) when a scan is due, and it exits when
+the scan ends. No MacScan process stays running in between. Turning an option off unloads and deletes
+its agent.
+
+- Every background scan is saved in History, marked *Scheduled* or *New downloads*. Of the background
+  scans that found nothing, only the 10 newest per kind are kept.
+- You get a notification only when something new is flagged. A scheduled scan doesn't notify again about
+  results its previous run already had. Click the notification to open the scan in History.
+- Background scans never run as administrator and never move or delete anything.
+- Scheduled scans run while you're logged in. A scan missed while the Mac was asleep runs after it wakes;
+  one missed while the Mac was off or you were logged out is skipped.
+- While an option is on, MacScan appears in System Settings › General › Login Items and in its own
+  Startup Items scan (labelled as MacScan's own agent).
+- The agents point at the copy of MacScan that turned them on. If you move the app, open it once and
+  MacScan repairs them.
+
 ### VirusTotal
 
 Free keys allow 4 lookups per minute and 500 per day, so MacScan spaces requests 15 s apart.
@@ -220,13 +250,16 @@ or turn on auto-lookup for flagged files only.
 | Log | `~/Library/Logs/MacScan/MacScan.log` (rotated at 5 MB) |
 | Scan history (JSON, last 100 scans) | `~/Library/Application Support/MacScan/History/` |
 | Ignore list | `~/Library/Application Support/MacScan/ignored.json` |
+| Downloads already seen (only with "Scan new downloads") | `~/Library/Application Support/MacScan/downloads-seen.json` |
+| Launch agents (only while background scans are on) | `~/Library/LaunchAgents/com.local.MacScan.*.plist` |
 | ClamAV database + `freshclam.conf` | `~/Library/Application Support/MacScan/` |
 | Settings and folder list | `defaults read com.local.MacScan` |
 | VirusTotal key | Login Keychain, service `MacScan.VirusTotal` |
 
 **Uninstall:** delete `MacScan.app`, the two folders above, run
 `defaults delete com.local.MacScan`, and remove the `MacScan.VirusTotal` Keychain item.
-There is nothing else to remove, because MacScan installs no background components.
+If background scans are on, turn them off in *Settings › Background* first so MacScan removes its launch
+agents. Otherwise there is nothing else to remove.
 
 ---
 
@@ -239,12 +272,14 @@ MacScan.xcodeproj
 MacScan/                      SwiftUI app (thin UI layer)
   MacScanApp.swift            Window + Settings scenes; kills child processes on quit
   AppState.swift              @Observable state, user actions (scan, trash, ignore, export…)
+  BackgroundNotifications.swift  Notification Center delivery and click handling for background scans
   Views/                      Main screen, results, history, settings, sheets
 Config/MacScan.entitlements   App Sandbox explicitly OFF
 Packages/MacScanCore/         All scanning logic (Swift package, testable with `swift test`)
   Sources/MacScanCore/
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
     Scanning/                 FileEnumerator, Persistence (startup items), Mach-O detection, ScanCoordinator
+    Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing
     Persistence/              History, ignore list, folder bookmarks, Full Disk Access helpers
     Export/                   JSON / CSV export
@@ -307,6 +342,7 @@ add a case to `EngineID` and register the engine in `EngineFactory.makeEngines`.
 ## Limitations
 
 - This is an on-demand scanner, not real-time protection. Keep macOS (XProtect) up to date as well.
+  The Downloads option scans a file after it arrives; it does not block it from being opened.
 - ClamAV's macOS coverage is limited, and the bundled YARA rules are heuristics. A clean result is
   not a guarantee.
 - `clamscan` loads the full signature database into memory (≈1 GB+) for the duration of a scan.

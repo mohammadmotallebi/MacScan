@@ -89,6 +89,11 @@ struct HistoryView: View {
         .onAppear {
             if selectedID == nil { selectedID = state.history.first?.id }
         }
+        .onChange(of: state.requestedHistorySelection, initial: true) { _, requested in
+            guard let requested else { return }
+            if state.history.contains(where: { $0.id == requested }) { selectedID = requested }
+            state.requestedHistorySelection = nil
+        }
     }
 }
 
@@ -109,6 +114,11 @@ struct HistoryRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 HStack(spacing: 8) {
+                    if let trigger = session.trigger {
+                        Label(trigger.title, systemImage: trigger == .scheduled ? "calendar.badge.clock" : "arrow.down.circle")
+                            .labelStyle(.titleAndIcon)
+                            .foregroundStyle(.secondary)
+                    }
                     if session.count(.threat) > 0 { Text("\(session.count(.threat)) threats").foregroundStyle(.red) }
                     if session.count(.warning) > 0 { Text("\(session.count(.warning)) warnings").foregroundStyle(.orange) }
                     if session.status != .completed { Text(session.status.rawValue.capitalized).foregroundStyle(.secondary) }

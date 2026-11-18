@@ -36,6 +36,24 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("ignored.json")
     }
 
+    /// What the Downloads watcher has already seen (so each run scans only new items).
+    public static var downloadsSeenFile: URL {
+        applicationSupport.appendingPathComponent("downloads-seen.json")
+    }
+
+    /// Held while a background scan runs, so the scheduled scan and the Downloads watcher take turns.
+    public static var backgroundLockFile: URL {
+        applicationSupport.appendingPathComponent("background.lock")
+    }
+
+    public static var downloads: URL {
+        home.appendingPathComponent("Downloads", isDirectory: true)
+    }
+
+    public static var launchAgents: URL {
+        home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
+    }
+
     public static var logs: URL {
         ensure(home.appendingPathComponent("Library/Logs/MacScan", isDirectory: true))
     }

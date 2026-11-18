@@ -106,6 +106,16 @@ public struct HistoryStore: Sendable {
         }
     }
 
+    /// Background scans that found nothing would otherwise push the user's own scans out of history:
+    /// per trigger, only the newest `count` of them are kept. Flagged sessions are never removed here.
+    public func pruneCleanBackgroundSessions(keeping count: Int) {
+        let all = loadAll()
+        for trigger in ScanTrigger.allCases {
+            let clean = all.filter { $0.trigger == trigger && $0.flagged.isEmpty }
+            for s in clean.dropFirst(max(0, count)) { try? delete(s.id) }
+        }
+    }
+
     private func prune() {
         let all = loadAll()
         guard all.count > maxSessions else { return }

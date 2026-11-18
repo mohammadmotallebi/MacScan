@@ -305,6 +305,9 @@ public struct PersistenceScanner: Sendable {
         var notes = [entry.kind.headline]
         if let note { notes.append(note) }
         if let label = entry.label { notes.append("Label: \(label)") }
+        if entry.label?.hasPrefix(BackgroundAgent.labelPrefix) == true, entry.arguments.contains(BackgroundScanWorker.flag) {
+            notes.append("This is MacScan's own background scan agent. Turn it off in MacScan › Settings › Background.")
+        }
         if let program = entry.program { notes.append("Program: \(program)") }
         if entry.arguments.count > 1 {
             let joined = entry.arguments.dropFirst().joined(separator: " ")

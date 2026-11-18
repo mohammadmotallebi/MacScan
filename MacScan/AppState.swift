@@ -76,6 +76,7 @@ final class AppState {
             guard settings != oldValue else { return }
             SettingsStore.save(settings)
             refreshEngineStatus()
+            backgroundSettingsChanged(from: oldValue)
         }
     }
 
@@ -110,10 +111,19 @@ final class AppState {
     var freshclam: FreshclamRun?
     var showFreshclam = false
 
+    /// Why the background launch agent could not be set up, if it couldn't.
+    var backgroundError: String?
+    var notificationPermission: NotificationPermission = .notAsked
+    var testNotificationInFlight = false
+    /// A scan the History screen should select (set when a notification is clicked).
+    var requestedHistorySelection: UUID?
+
     // MARK: Private
 
     private var scanTask: Task<Void, Never>?
     private var freshclamTask: Task<Void, Never>?
+    private var backgroundSyncTask: Task<Void, Never>?
+    private var activationObserver: (any NSObjectProtocol)?
     private let historyStore = HistoryStore()
     private let targetStore = TargetStore()
     private let logger = FileLogger.shared
@@ -127,6 +137,108 @@ final class AppState {
         hasVirusTotalKey = KeychainStore.virusTotal.read() != nil
         logger.info("MacScan launched")
         refreshEngineStatus()
+
+        NotificationRouter.shared.openSession = { [weak self] id in self?.showSession(id) }
+        // Background scans save to history while the app is open or closed: pick them up when MacScan comes forward.
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.settings.backgroundScansEnabled else { return }
+                self.reloadHistory()
+            }
+        }
+        repairBackgroundAgentIfNeeded()
+    }
+
+    // MARK: - Background scans (scheduled, new downloads)
+
+    private func backgroundSettingsChanged(from old: ScanSettings) {
+        let unchanged = settings.scheduledScanEnabled == old.scheduledScanEnabled
+            && settings.watchDownloads == old.watchDownloads
+            && settings.scheduleFrequency == old.scheduleFrequency
+            && settings.scheduleWeekday == old.scheduleWeekday
+            && settings.scheduleHour == old.scheduleHour
+            && settings.scheduleMinute == old.scheduleMinute
+        guard !unchanged else { return }
+
+        if settings.watchDownloads != old.watchDownloads {
+            let tracker = DownloadsTracker()
+            if settings.watchDownloads {
+                // Mark what's already in Downloads as seen. Reading the folder here also makes macOS ask
+                // for access now, in the app, instead of during a background scan.
+                do {
+                    try tracker.baseline()
+                } catch {
+                    logger.warning("Cannot read Downloads: \(error.localizedDescription)")
+                    if PermissionErrors.isPermissionDenied(error) { fdaPrompt = FDAPrompt(paths: [tracker.folder.path]) }
+                }
+            } else {
+                tracker.forget()
+            }
+        }
+        syncBackgroundAgent()
+    }
+
+    /// Installs, updates or removes MacScan's launch agents so they match the settings.
+    func syncBackgroundAgent() {
+        guard let executable = Bundle.main.executableURL else { return }
+        let settings = settings
+        let previous = backgroundSyncTask
+        backgroundSyncTask = Task {
+            await previous?.value   // apply changes in the order they were made
+            do {
+                try await BackgroundAgent(executable: executable).sync(settings: settings)
+                self.backgroundError = nil
+            } catch {
+                self.backgroundError = error.localizedDescription
+            }
+            if settings.backgroundScansEnabled {
+                self.notificationPermission = await NotificationPermission.request()
+            }
+        }
+    }
+
+    /// At launch: if an enabled agent is missing or points at a MacScan copy that no longer exists
+    /// (the app was moved), install it again. An agent that works is left alone.
+    private func repairBackgroundAgentIfNeeded() {
+        guard settings.backgroundScansEnabled, let executable = Bundle.main.executableURL else { return }
+        let agent = BackgroundAgent(executable: executable)
+        let enabled: [ScanTrigger] = (settings.scheduledScanEnabled ? [.scheduled] : []) + (settings.watchDownloads ? [.downloads] : [])
+        let broken = enabled.contains { trigger in
+            guard let installed = agent.installedExecutable(for: trigger) else { return true }
+            return !FileManager.default.fileExists(atPath: installed)
+        }
+        if broken {
+            logger.info("Background agent missing or outdated: reinstalling")
+            syncBackgroundAgent()
+        } else {
+            Task { self.notificationPermission = await NotificationPermission.current() }
+        }
+    }
+
+    /// Posts a test notification through the same headless path a background scan uses.
+    func sendTestNotification() {
+        guard !testNotificationInFlight, let executable = Bundle.main.executableURL else { return }
+        testNotificationInFlight = true
+        Task {
+            self.notificationPermission = await NotificationPermission.request()
+            _ = try? await ProcessRunner.run(executable, [BackgroundScanWorker.flag, BackgroundScanWorker.testArgument])
+            self.testNotificationInFlight = false
+        }
+    }
+
+    func reloadHistory() {
+        let store = historyStore
+        Task {
+            let loaded = await Task.detached { store.loadAll() }.value
+            if loaded.map(\.id) != self.history.map(\.id) { self.history = loaded }
+        }
+    }
+
+    /// Opens a scan in History (used when a background-scan notification is clicked).
+    func showSession(_ id: UUID) {
+        history = historyStore.loadAll()
+        selectedSection = .history
+        requestedHistorySelection = id
     }
 
     // MARK: - Engine status

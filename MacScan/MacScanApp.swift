@@ -3,7 +3,8 @@ import MacScanCore
 import SwiftUI
 
 /// Entry point. `--macscan-elevated-scan` runs the headless root scan worker (launched by an
-/// administrator scan behind the password prompt) instead of the app.
+/// administrator scan behind the password prompt) instead of the app, and `--macscan-background-scan`
+/// runs one headless scheduled or Downloads scan (launched by launchd) and exits.
 @main
 enum MacScanMain {
     @MainActor
@@ -11,6 +12,9 @@ enum MacScanMain {
         let args = CommandLine.arguments
         if args.count > 1, args[1] == ElevatedScanWorker.flag {
             exit(ElevatedScanWorker.main(arguments: Array(args.dropFirst(2))))
+        }
+        if args.count > 1, args[1] == BackgroundScanWorker.flag {
+            exit(BackgroundScanWorker.main(arguments: Array(args.dropFirst(2)), notifier: UserNotifier()))
         }
         MacScanApp.main()
     }
@@ -21,7 +25,8 @@ struct MacScanApp: App {
     @State private var state = AppState()
 
     var body: some Scene {
-        // A single window. Closing it quits the app; nothing keeps running in the background.
+        // A single window. Closing it quits the app; no MacScan process keeps running in the background.
+        // (Optional background scans are started by launchd and exit when they finish.)
         Window("MacScan", id: "main") {
             ContentView()
                 .environment(state)
@@ -74,6 +79,11 @@ struct MacScanApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Must be set before launch finishes, or a click on a notification that started the app is lost.
+        NotificationRouter.shared.install()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

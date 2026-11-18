@@ -164,8 +164,23 @@ public enum ScanStatus: String, Codable, Sendable {
     case failed
 }
 
+/// What started a background scan. Scans the user starts in the app have no trigger.
+public enum ScanTrigger: String, Codable, Sendable, CaseIterable {
+    case scheduled
+    case downloads
+
+    public var title: String {
+        switch self {
+        case .scheduled: "Scheduled"
+        case .downloads: "New downloads"
+        }
+    }
+}
+
 public struct ScanSession: Codable, Hashable, Identifiable, Sendable {
     public var id: UUID
+    /// Set for scans started by launchd (schedule or Downloads watcher); nil for scans started in the app.
+    public var trigger: ScanTrigger?
     public var startedAt: Date
     public var finishedAt: Date?
     public var targets: [String]
@@ -203,6 +218,9 @@ public struct ScanSession: Codable, Hashable, Identifiable, Sendable {
     public func count(_ severity: Severity) -> Int {
         findings.lazy.filter { $0.severity == severity }.count
     }
+
+    /// Threats and warnings (everything that isn't a "clean" row).
+    public var flagged: [Finding] { findings.filter { $0.severity > .clean } }
 
     public var worstSeverity: Severity {
         findings.map(\.severity).max() ?? .clean
