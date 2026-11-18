@@ -53,6 +53,7 @@ public struct ScanCoordinator: Sendable {
     let logger: FileLogger
     let persistenceLocations: PersistenceLocations
     let processLister: any ProcessListing
+    let browserLocations: BrowserLocations
 
     public init(
         engines: [any ScanEngine],
@@ -61,8 +62,10 @@ public struct ScanCoordinator: Sendable {
         ignoreList: IgnoreList = IgnoreList(),
         logger: FileLogger = .shared,
         persistenceLocations: PersistenceLocations = .system,
-        processLister: any ProcessListing = SystemProcessList()
+        processLister: any ProcessListing = SystemProcessList(),
+        browserLocations: BrowserLocations = .system
     ) {
+        self.browserLocations = browserLocations
         self.processLister = processLister
         self.persistenceLocations = persistenceLocations
         self.engines = engines
@@ -81,7 +84,7 @@ public struct ScanCoordinator: Sendable {
         // 1. Enumerate.
         let enumeration: EnumerationResult
         do {
-            enumeration = try FileEnumerator(settings: settings, persistenceLocations: persistenceLocations, processLister: processLister).enumerate(targets)
+            enumeration = try FileEnumerator(settings: settings, persistenceLocations: persistenceLocations, processLister: processLister, browserLocations: browserLocations).enumerate(targets)
         } catch {
             return finish(&session, status: .cancelled)
         }
@@ -89,6 +92,7 @@ public struct ScanCoordinator: Sendable {
         session.skippedCount = enumeration.skippedCount
         session.notes += enumeration.notes
         session.startupSnapshot = enumeration.startupSnapshot
+        session.extensionSnapshot = enumeration.extensionSnapshot
         session.itemsTotal = enumeration.items.count
         for issue in enumeration.issues.prefix(50) {
             logger.warning("Cannot read \(issue.path): \(issue.message)")
@@ -155,7 +159,8 @@ public struct ScanCoordinator: Sendable {
         let engineFindings = await tracker.findings.filter {
             !($0.engine == .integrity && enumeration.processExecutables.contains($0.path))
         }
-        var findings = enumeration.persistenceFindings + enumeration.processFindings + engineFindings
+        var findings = enumeration.persistenceFindings + enumeration.processFindings + enumeration.extensionFindings + engineFindings
+        if targets.contains(.browserExtensions) { session.enginesUsed.append(.extensions) }
         if targets.contains(.runningProcesses) { session.enginesUsed.append(.processes) }
         if targets.contains(.startupItems) {
             session.enginesUsed.append(.persistence)

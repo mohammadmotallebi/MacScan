@@ -42,7 +42,7 @@ struct ResultsView: View {
                 if hasChanges {
                     Toggle("New or changed (\(session.findings.filter { $0.change != nil }.count))", isOn: $changedOnly)
                         .toggleStyle(.checkbox)
-                        .help("Show only startup items that were added or changed since the previous Startup Items scan")
+                        .help("Show only startup items or browser extensions that were added or changed since the previous scan of that kind")
                 }
                 Spacer()
                 TextField("Filter by path or reason", text: $search)

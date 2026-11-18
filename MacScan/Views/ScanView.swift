@@ -75,6 +75,15 @@ struct ScanControlsPanel: View {
                         .help("The programs running right now: who signed them, who runs them and where they run from. Nothing is stopped or changed.")
 
                         Button {
+                            state.scanBrowserExtensions()
+                        } label: {
+                            Label("Scan Browser Extensions", systemImage: "puzzlepiece.extension")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.large)
+                        .help("Extensions in Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari: where they came from and what they may do. Nothing is disabled or removed.")
+
+                        Button {
                             state.scanCustomFolders()
                         } label: {
                             Label("Scan Folders", systemImage: "folder.badge.gearshape")
@@ -167,6 +176,7 @@ struct ScanControlsPanel: View {
                         EngineStatusRow(engine: .integrity)
                         EngineStatusRow(engine: .persistence)
                         EngineStatusRow(engine: .processes)
+                        EngineStatusRow(engine: .extensions)
                         EngineStatusRow(engine: .virustotal)
                     }
                     .padding(4)

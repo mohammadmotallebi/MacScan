@@ -46,6 +46,11 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("startup-baseline.json")
     }
 
+    /// The browser extensions seen by the last Browser Extensions scan (to report what changed since).
+    public static var extensionBaselineFile: URL {
+        applicationSupport.appendingPathComponent("extensions-baseline.json")
+    }
+
     /// Held while a background scan runs, so the scheduled scan and the Downloads watcher take turns.
     public static var backgroundLockFile: URL {
         applicationSupport.appendingPathComponent("background.lock")

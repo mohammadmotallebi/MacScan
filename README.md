@@ -7,6 +7,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **App integrity**: `codesign --verify --deep --strict`, Gatekeeper/notarization (`spctl`), unsigned/ad-hoc executables, quarantine info
 - **Signer checks**: flags **self-signed** apps and binaries (certificates Apple didn't issue, typical of cracked or repackaged software) and apps that **impersonate** a well-known publisher's bundle ID
 - **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
+- **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
 - Results with severity filter, Reveal in Finder, Move to Trash (always asks first), Ignore
@@ -201,6 +202,29 @@ Translocation, code-sign clones, iPhone app wrappers).
 Nothing is stopped, suspended or changed. Quit a program yourself in Activity Monitor if you don't trust it.
 This is a snapshot of the moment you scan, not live monitoring.
 
+### Browser Extensions scan
+
+**Scan Browser Extensions** (⇧⌘E) lists one row per extension in Chrome (including Beta and Canary),
+Chromium, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari, for every profile, with its version, whether
+it is enabled, where it was installed from, which websites it can access and its permissions.
+
+Extensions are flagged (**Warning**) when they:
+- were not installed from the browser's store: loaded from a local folder, added by another program,
+  force-installed by a policy, or (Firefox) not signed by Mozilla
+- are enabled, can read and change **all websites**, and also hold a sensitive permission (cookies, history,
+  native messaging, debugger, proxy, managing other extensions, network requests, clipboard, privacy settings)
+- (Safari) belong to an app that isn't signed by a trusted developer
+
+Ad blockers and password managers legitimately need that much access, so expect a warning for them the first
+time; choose **Ignore** for the ones you trust. Each extension's files also go through ClamAV and YARA, and a
+hit inside an extension is reported under that extension. Like Startup Items, each scan is compared with the
+previous one: new extensions and ones that gained permissions or website access get a **NEW** or **CHANGED**
+badge. An ordinary version update is not a change.
+
+Nothing is disabled or removed; do that in the browser's own extension settings. For Safari, macOS reveals
+what an extension may ask for, not which websites you allowed. Browsers built into the system (components) and
+Firefox themes are not listed.
+
 ### Uninstall
 
 **Uninstall** in the sidebar (⇧⌘U), or **Uninstall App…** on any scan result inside an app:
@@ -282,6 +306,7 @@ or turn on auto-lookup for flagged files only.
 | Ignore list | `~/Library/Application Support/MacScan/ignored.json` |
 | Downloads already seen (only with "Scan new downloads") | `~/Library/Application Support/MacScan/downloads-seen.json` |
 | Startup items of the last scan (to report changes) | `~/Library/Application Support/MacScan/startup-baseline.json` |
+| Browser extensions of the last scan (to report changes) | `~/Library/Application Support/MacScan/extensions-baseline.json` |
 | Launch agents (only while background scans are on) | `~/Library/LaunchAgents/com.local.MacScan.*.plist` |
 | ClamAV database + `freshclam.conf` | `~/Library/Application Support/MacScan/` |
 | Settings and folder list | `defaults read com.local.MacScan` |
@@ -309,7 +334,7 @@ Config/MacScan.entitlements   App Sandbox explicitly OFF
 Packages/MacScanCore/         All scanning logic (Swift package, testable with `swift test`)
   Sources/MacScanCore/
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
-    Scanning/                 FileEnumerator, Persistence (startup items), RunningProcesses, Mach-O detection, ScanCoordinator
+    Scanning/                 FileEnumerator, Persistence (startup items), StartupChanges, RunningProcesses, BrowserExtensions, Mach-O detection, ScanCoordinator
     Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing
     Persistence/              History, ignore list, folder bookmarks, Full Disk Access helpers

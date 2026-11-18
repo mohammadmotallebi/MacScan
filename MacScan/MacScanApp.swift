@@ -44,6 +44,9 @@ struct MacScanApp: App {
                 Button("Scan Running Processes") { state.scanRunningProcesses() }
                     .keyboardShortcut("p", modifiers: [.command, .shift])
                     .disabled(state.isScanning)
+                Button("Scan Browser Extensions") { state.scanBrowserExtensions() }
+                    .keyboardShortcut("e", modifiers: [.command, .shift])
+                    .disabled(state.isScanning)
                 Button("Scan Folders") { state.scanCustomFolders() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(state.isScanning || state.customFolders.isEmpty)

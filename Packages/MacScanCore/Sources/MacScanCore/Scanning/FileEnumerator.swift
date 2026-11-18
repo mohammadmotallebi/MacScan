@@ -11,6 +11,9 @@ public struct EnumerationResult: Sendable {
     public var coveredUnits: Set<String> = []
     /// Startup items collected by a Startup Items target (nil when there was none).
     public var startupSnapshot: StartupSnapshot?
+    /// Findings and snapshot from the browser-extension inventory (engine `.extensions`).
+    public var extensionFindings: [Finding] = []
+    public var extensionSnapshot: [String: BrowserExtensionState]?
     /// Findings from the running-process inventory (engine `.processes`).
     public var processFindings: [Finding] = []
     /// Executables of running programs; their signature verdict comes from the process finding.
@@ -31,6 +34,7 @@ public struct FileEnumerator: Sendable {
     public let settings: ScanSettings
     public let persistenceLocations: PersistenceLocations
     public let processLister: any ProcessListing
+    public let browserLocations: BrowserLocations
 
     /// Script-like extensions considered "executable content" in Applications scans.
     static let scriptExtensions: Set<String> = [
@@ -39,7 +43,9 @@ public struct FileEnumerator: Sendable {
     ]
 
     public init(settings: ScanSettings, persistenceLocations: PersistenceLocations = .system,
-                processLister: any ProcessListing = SystemProcessList()) {
+                processLister: any ProcessListing = SystemProcessList(),
+                browserLocations: BrowserLocations = .system) {
+        self.browserLocations = browserLocations
         self.settings = settings
         self.persistenceLocations = persistenceLocations
         self.processLister = processLister
@@ -73,6 +79,16 @@ public struct FileEnumerator: Sendable {
                 }
                 for path in inventory.programPaths {
                     walker.addProgram(URL(fileURLWithPath: path))
+                }
+            case .browserExtensions:
+                let inventory = try BrowserExtensionScanner(locations: browserLocations).collect()
+                walker.result.extensionFindings += inventory.findings
+                walker.result.extensionSnapshot = inventory.snapshot
+                walker.result.coveredUnits.formUnion(inventory.coveredUnits)
+                walker.result.notes += inventory.notes
+                for path in inventory.scanPaths {
+                    // Each extension is one unit: its hundreds of script files don't get a row each.
+                    try walker.walk(URL(fileURLWithPath: path), applicationsMode: false, unit: URL(fileURLWithPath: path))
                 }
             case .runningProcesses:
                 let inventory = try ProcessScanner(lister: processLister).collect()
@@ -115,7 +131,8 @@ public struct FileEnumerator: Sendable {
             self.excluder = PathExcluder(settings.excludedPaths)
         }
 
-        mutating func walk(_ root: URL, applicationsMode: Bool) throws {
+        /// `unit` makes every file below `root` belong to that one result unit (as files in an app do).
+        mutating func walk(_ root: URL, applicationsMode: Bool, unit: URL? = nil) throws {
             // The user explicitly chose this root, so a symlinked root is resolved.
             let root = Paths.canonical(root)
             let rootPath = root.path
@@ -129,7 +146,7 @@ public struct FileEnumerator: Sendable {
 
             if !isDir.boolValue {
                 let values = try? root.resourceValues(forKeys: Set(Self.keys))
-                addFile(root, values: values, bundle: nil, applicationsMode: applicationsMode)
+                addFile(root, values: values, bundle: unit, applicationsMode: applicationsMode)
                 return
             }
 
@@ -141,8 +158,8 @@ public struct FileEnumerator: Sendable {
                 return
             }
 
-            var currentBundle: URL?
-            if isAppBundle(root) {
+            var currentBundle: URL? = unit
+            if unit == nil, isAppBundle(root) {
                 addBundle(root)
                 currentBundle = root
             }
@@ -163,7 +180,7 @@ public struct FileEnumerator: Sendable {
                 if counter % 256 == 0 { try Task.checkCancellation() }
 
                 let path = url.path
-                if let b = currentBundle, !path.hasPrefix(b.path + "/") {
+                if unit == nil, let b = currentBundle, !path.hasPrefix(b.path + "/") {
                     currentBundle = nil
                 }
                 let values = try? url.resourceValues(forKeys: Set(Self.keys))
@@ -186,7 +203,7 @@ public struct FileEnumerator: Sendable {
                 }
 
                 if values?.isDirectory == true {
-                    if currentBundle == nil, isAppBundle(url) {
+                    if unit == nil, currentBundle == nil, isAppBundle(url) {
                         addBundle(url)
                         currentBundle = url
                     }

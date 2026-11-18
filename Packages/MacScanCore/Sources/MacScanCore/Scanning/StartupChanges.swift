@@ -16,7 +16,15 @@ public enum FindingChange: String, Codable, Sendable {
 /// What one startup item does, reduced to the parts whose change matters: what it starts, with which
 /// arguments, who signed that program, and (for scripts and shell files) the file's contents.
 /// An app update that replaces a program with one from the same signer is deliberately not a change.
-public struct StartupItemState: Codable, Hashable, Sendable {
+/// The tracked facts about one inventory item (a startup item, a browser extension).
+public protocol TrackedItemState: Codable, Hashable, Sendable {
+    /// Display name.
+    var name: String { get }
+    /// Plain-language differences from an earlier state of the same item; empty when nothing relevant changed.
+    func differences(from old: Self) -> [String]
+}
+
+public struct StartupItemState: TrackedItemState {
     /// Display name (launchd label, file name or cron job).
     public var name: String
     public var program: String?
@@ -98,7 +106,9 @@ public struct StartupChangeSummary: Codable, Hashable, Sendable {
 
     public var isEmpty: Bool { added.isEmpty && changed.isEmpty && removed.isEmpty }
 
-    public var text: String {
+    public var text: String { text(subject: "Startup items") }
+
+    public func text(subject: String) -> String {
         func part(_ names: [String], _ word: String) -> String? {
             guard !names.isEmpty else { return nil }
             let shown = names.prefix(5).joined(separator: ", ") + (names.count > 5 ? " and \(names.count - 5) more" : "")
@@ -107,28 +117,75 @@ public struct StartupChangeSummary: Codable, Hashable, Sendable {
         let date = since.formatted(date: .abbreviated, time: .shortened)
         let parts = [part(added, "new"), part(changed, "changed"), part(removed, "removed")].compactMap { $0 }
         return parts.isEmpty
-            ? "Startup items: nothing added, changed or removed since the scan on \(date)."
-            : "Startup items since the scan on \(date): " + parts.joined(separator: "; ") + "."
+            ? "\(subject): nothing added, changed or removed since the scan on \(date)."
+            : "\(subject) since the scan on \(date): " + parts.joined(separator: "; ") + "."
     }
+}
+
+/// Shared comparison of an inventory with its saved baseline file.
+enum ChangeTracking {
+    struct Baseline<State: TrackedItemState>: Codable {
+        var savedAt: Date
+        var items: [String: State]
+    }
+
+    /// Marks new and changed results of `engine` in the session, adds a summary note, saves `snapshot`
+    /// as the new baseline, and returns the summary (nil for the first scan).
+    static func apply<State: TrackedItemState>(
+        snapshot: [String: State], file: URL, engine: EngineID, subject: String, session: inout ScanSession
+    ) -> StartupChangeSummary? {
+        defer {
+            do {
+                try JSONEncoder.macScan.encode(Baseline(savedAt: session.startedAt, items: snapshot)).write(to: file, options: .atomic)
+            } catch {
+                session.notes.append("Could not save the baseline for \(subject.lowercased()): \(error.localizedDescription)")
+            }
+        }
+        guard let data = try? Data(contentsOf: file),
+              let baseline = try? JSONDecoder.macScan.decode(Baseline<State>.self, from: data) else {
+            session.notes.append("\(subject): baseline saved (\(snapshot.count) items). Later scans report what was added, changed or removed.")
+            return nil
+        }
+
+        var summary = StartupChangeSummary(since: baseline.savedAt)
+        let date = baseline.savedAt.formatted(date: .abbreviated, time: .shortened)
+        for key in snapshot.keys.sorted() {
+            let state = snapshot[key]!
+            let change: FindingChange
+            let lead: String
+            if let old = baseline.items[key] {
+                let differences = state.differences(from: old)
+                guard !differences.isEmpty else { continue }
+                change = .changed
+                summary.changed.append(state.name)
+                lead = "Changed since the scan on \(date):\n" + differences.map { "• \($0)" }.joined(separator: "\n")
+            } else {
+                change = .new
+                summary.added.append(state.name)
+                lead = "New since the scan on \(date)."
+            }
+            for index in session.findings.indices where session.findings[index].engine == engine && session.findings[index].changeKey(default: session.findings[index].unitPath) == key {
+                session.findings[index].change = change
+                session.findings[index].detail = lead + "\n\n" + (session.findings[index].detail ?? "")
+            }
+        }
+        summary.removed = baseline.items.filter { snapshot[$0.key] == nil }.map(\.value.name).sorted()
+        session.notes.append(summary.text(subject: subject))
+        return summary
+    }
+}
+
+extension Finding {
+    func changeKey(default fallback: String) -> String { trackingKey ?? fallback }
 }
 
 /// Remembers the startup items of the last scan and marks what is new or changed in the next one.
 /// The only file it writes is its own baseline; startup items themselves are never touched.
 public struct StartupChangeTracker: Sendable {
-    struct Baseline: Codable {
-        var savedAt: Date
-        var items: StartupSnapshot
-    }
-
     public let file: URL
 
     public init(file: URL = AppPaths.startupBaselineFile) {
         self.file = file
-    }
-
-    func load() -> Baseline? {
-        guard let data = try? Data(contentsOf: file) else { return nil }
-        return try? JSONDecoder.macScan.decode(Baseline.self, from: data)
     }
 
     public func forget() {
@@ -141,42 +198,21 @@ public struct StartupChangeTracker: Sendable {
     public func apply(to session: inout ScanSession) {
         guard let snapshot = session.startupSnapshot else { return }
         session.startupSnapshot = nil   // the baseline file holds it from here on
-        defer {
-            do {
-                try JSONEncoder.macScan.encode(Baseline(savedAt: session.startedAt, items: snapshot)).write(to: file, options: .atomic)
-            } catch {
-                session.notes.append("Could not save the startup item baseline: \(error.localizedDescription)")
-            }
-        }
-        guard let baseline = load() else {
-            session.notes.append("Startup items: baseline saved (\(snapshot.count) items). Later scans report what was added, changed or removed.")
-            return
-        }
+        session.startupChanges = ChangeTracking.apply(snapshot: snapshot, file: file, engine: .persistence, subject: "Startup items", session: &session)
+    }
+}
 
-        var summary = StartupChangeSummary(since: baseline.savedAt)
-        let date = baseline.savedAt.formatted(date: .abbreviated, time: .shortened)
-        for key in snapshot.keys.sorted() {
-            let state = snapshot[key]!
-            var change: FindingChange?
-            var lead = ""
-            if let old = baseline.items[key] {
-                let differences = state.differences(from: old)
-                guard !differences.isEmpty else { continue }
-                change = .changed
-                summary.changed.append(state.name)
-                lead = "Changed since the scan on \(date):\n" + differences.map { "• \($0)" }.joined(separator: "\n")
-            } else {
-                change = .new
-                summary.added.append(state.name)
-                lead = "New since the scan on \(date)."
-            }
-            for index in session.findings.indices where session.findings[index].engine == .persistence && session.findings[index].unitPath == key {
-                session.findings[index].change = change
-                session.findings[index].detail = lead + "\n\n" + (session.findings[index].detail ?? "")
-            }
-        }
-        summary.removed = baseline.items.filter { snapshot[$0.key] == nil }.map(\.value.name).sorted()
-        session.startupChanges = summary
-        session.notes.append(summary.text)
+/// The same for browser extensions: what was installed, or gained permissions, since the last scan.
+public struct ExtensionChangeTracker: Sendable {
+    public let file: URL
+
+    public init(file: URL = AppPaths.extensionBaselineFile) {
+        self.file = file
+    }
+
+    public func apply(to session: inout ScanSession) {
+        guard let snapshot = session.extensionSnapshot else { return }
+        session.extensionSnapshot = nil
+        session.extensionChanges = ChangeTracking.apply(snapshot: snapshot, file: file, engine: .extensions, subject: "Browser extensions", session: &session)
     }
 }

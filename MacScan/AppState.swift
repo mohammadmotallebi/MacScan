@@ -253,6 +253,7 @@ final class AppState {
             status[.integrity] = settings.enableIntegrity ? await AppIntegrityEngine().availability() : .disabled
             status[.persistence] = .available(detail: "Launch agents & daemons, helpers, shell files, plug-ins, cron")
             status[.processes] = .available(detail: "Signature, owner and location of running programs")
+            status[.extensions] = .available(detail: "Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox, Safari")
             status[.virustotal] = hasKey
                 ? .available(detail: settings.vtAutoLookupFlagged ? "Auto-lookup for flagged files" : "Manual lookups only")
                 : .needsSetup("Optional: add your own API key in Settings")
@@ -276,6 +277,10 @@ final class AppState {
 
     func scanRunningProcesses() {
         startScan([.runningProcesses])
+    }
+
+    func scanBrowserExtensions() {
+        startScan([.browserExtensions])
     }
 
     func scanCustomFolders() {
@@ -359,6 +364,7 @@ final class AppState {
         var session = session
         // Here, as the user, and not in the coordinator: an administrator scan runs that as root.
         StartupChangeTracker().apply(to: &session)
+        ExtensionChangeTracker().apply(to: &session)
         isScanning = false
         progress = nil
         scanTask = nil

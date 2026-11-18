@@ -37,6 +37,7 @@ public enum EngineID: String, Codable, CaseIterable, Sendable, Identifiable {
     case virustotal
     case persistence
     case processes
+    case extensions
     /// Synthetic engine used for "no issues found" rows and scanner-level notes.
     case scanner
 
@@ -50,6 +51,7 @@ public enum EngineID: String, Codable, CaseIterable, Sendable, Identifiable {
         case .virustotal: "VirusTotal"
         case .persistence: "Startup Items"
         case .processes: "Running Processes"
+        case .extensions: "Browser Extensions"
         case .scanner: "All engines"
         }
     }
@@ -74,6 +76,8 @@ public struct Finding: Codable, Hashable, Identifiable, Sendable {
     public var date: Date
     /// Set on startup items that are new or changed since the previous Startup Items scan.
     public var change: FindingChange?
+    /// Identity used for change tracking when it differs from `unitPath` (browser extensions).
+    public var trackingKey: String?
 
     public init(
         id: UUID = UUID(),
@@ -84,8 +88,10 @@ public struct Finding: Codable, Hashable, Identifiable, Sendable {
         detail: String? = nil,
         sha256: String? = nil,
         unitPath: String? = nil,
-        date: Date = Date()
+        date: Date = Date(),
+        trackingKey: String? = nil
     ) {
+        self.trackingKey = trackingKey
         self.id = id
         self.path = path
         self.severity = severity
@@ -138,12 +144,15 @@ public enum ScanTarget: Codable, Hashable, Sendable {
     case startupItems
     /// The programs that are running right now.
     case runningProcesses
+    /// Extensions of Chromium-based browsers, Firefox and Safari.
+    case browserExtensions
 
     public var displayName: String {
         switch self {
         case .applications: "Applications"
         case .startupItems: "Startup Items"
         case .runningProcesses: "Running Processes"
+        case .browserExtensions: "Browser Extensions"
         case .path(let url): url.path
         }
     }
@@ -205,6 +214,9 @@ public struct ScanSession: Codable, Hashable, Identifiable, Sendable {
     public var startupSnapshot: StartupSnapshot?
     /// What was added, changed or removed since the previous Startup Items scan (nil for the first one).
     public var startupChanges: StartupChangeSummary?
+    /// The same pair for a Browser Extensions scan.
+    public var extensionSnapshot: [String: BrowserExtensionState]?
+    public var extensionChanges: StartupChangeSummary?
 
     public init(
         id: UUID = UUID(),
