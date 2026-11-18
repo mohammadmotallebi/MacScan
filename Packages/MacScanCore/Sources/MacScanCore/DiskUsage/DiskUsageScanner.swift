@@ -112,6 +112,35 @@ public struct DiskUsageReport: Sendable {
         return candidates.prefix(keep).map(\.path)
     }
 
+    /// Updates the report after everything inside a folder was moved to the Trash: the folder stays, empty.
+    public mutating func markEmptied(_ path: String) {
+        guard var f = folders[path] else { return }
+        let size = f.size
+        let files = f.fileCount
+        let prefix = path + "/"
+        folders = folders.filter { !$0.key.hasPrefix(prefix) }
+        largestFiles.removeAll { $0.path.hasPrefix(prefix) }
+        topFolders.removeAll { $0.hasPrefix(prefix) }
+        f.size = 0
+        f.fileCount = 0
+        f.childFolders = []
+        f.files = []
+        f.otherFilesSize = 0
+        f.otherFilesCount = 0
+        folders[path] = f
+        var parent = (path as NSString).deletingLastPathComponent
+        while path != root, parent.count >= root.count, var p = folders[parent] {
+            p.size -= size
+            p.fileCount -= files
+            folders[parent] = p
+            if parent == root { break }
+            parent = (parent as NSString).deletingLastPathComponent
+        }
+        totalSize -= size
+        fileCount -= files
+        folderCount = folders.count
+    }
+
     /// Updates the report after the user moved an item to the Trash: subtracts its size from every folder above it.
     public mutating func markRemoved(_ item: DiskItem) {
         guard !item.isAggregate else { return }

@@ -37,6 +37,25 @@ struct DiskUsageView: View {
         } message: { pending in
             Text("\(pending.item.path)\n\(pending.item.size.formatted(.byteCount(style: .file)))\(pending.item.isDirectory ? " in \(pending.item.fileCount.formatted()) files" : "")\n\nIt goes to the Trash, where you can restore it until you empty the Trash.")
         }
+        .confirmationDialog("Move contents to Trash?",
+                            isPresented: Binding(get: { model.pendingEmpty != nil }, set: { if !$0 { model.pendingEmpty = nil } }),
+                            presenting: model.pendingEmpty) { pending in
+            Button("Move Everything in “\(pending.suggestion.item.name)” to Trash", role: .destructive) { model.confirmEmpty(pending) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text("\(pending.suggestion.item.path)\n\(pending.suggestion.item.size.formatted(.byteCount(style: .file)))\n\n\(pending.suggestion.explanation)\n\nThe folder itself stays. Everything inside goes to the Trash, where you can restore it until you empty the Trash.")
+        }
+        .alert("How to clean this", isPresented: Binding(get: { model.infoMessage != nil }, set: { if !$0 { model.infoMessage = nil } })) {
+            if let command = model.infoMessage.flatMap(CleanupSuggestionRow.command) {
+                Button("Copy Command") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(command, forType: .string)
+                }
+            }
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.infoMessage ?? "")
+        }
         .alert("Disk Usage", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") {}
         } message: {
@@ -133,7 +152,9 @@ struct DiskUsageReportView: View {
                 Divider()
             }
             Picker("", selection: $model.tab) {
-                ForEach(DiskUsageModel.Tab.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(DiskUsageModel.Tab.allCases) { tab in
+                    Text(tab == .cleanup && !model.suggestions.isEmpty ? "Cleanup (\(model.suggestions.count))" : tab.rawValue).tag(tab)
+                }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -141,6 +162,7 @@ struct DiskUsageReportView: View {
             .padding(8)
 
             switch model.tab {
+            case .cleanup: CleanupList()
             case .folders: FolderBrowser(report: report)
             case .largestFiles: DiskItemList(items: report.largestFiles, scale: report.largestFiles.first?.size ?? 1, showFolder: true)
             case .largestFolders:
@@ -219,6 +241,7 @@ struct DiskItemList: View {
 }
 
 struct DiskItemRow: View {
+    @Environment(AppState.self) private var state
     let item: DiskItem
     let fraction: Double
     let showFolder: Bool
@@ -247,6 +270,10 @@ struct DiskItemRow: View {
             }
             .help(item.isAggregate ? "Files smaller than 1 MB in this folder, added together" : item.path)
             Spacer(minLength: 12)
+            if let suggestion = state.diskUsage.suggestionByPath[item.path] {
+                PriorityBadge(priority: suggestion.priority)
+                    .help("\(suggestion.title): \(suggestion.explanation)")
+            }
             SizeBar(fraction: fraction)
                 .frame(width: 120, height: 6)
             Text(item.size.formatted(.byteCount(style: .file)))
@@ -273,5 +300,120 @@ struct SizeBar: View {
                     .frame(width: max(2, geo.size.width * min(1, max(0, fraction))))
             }
         }
+    }
+}
+
+/// Folders and files that are usually safe or worthwhile to delete, with what that means and how.
+struct CleanupList: View {
+    @Environment(AppState.self) private var state
+
+    var body: some View {
+        let model = state.diskUsage
+        VStack(spacing: 0) {
+            HStack(spacing: 16) {
+                Label("\(model.size(of: .safe).formatted(.byteCount(style: .file))) safe to clean", systemImage: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Label("\(model.size(of: .review).formatted(.byteCount(style: .file))) to review", systemImage: "eye.fill")
+                    .foregroundStyle(.orange)
+                Spacer()
+                if model.isCleaning { ProgressView().controlSize(.small); Text("Moving to Trash…").foregroundStyle(.secondary) }
+            }
+            .font(.callout.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
+            Divider()
+            List {
+                ForEach(CleanupPriority.allCases, id: \.self) { priority in
+                    let items = model.suggestions.filter { $0.priority == priority }
+                    if !items.isEmpty {
+                        Section(priority == .safe ? "Safe to clean: rebuilt or re-downloaded automatically" : "Review first: check before deleting") {
+                            ForEach(items) { CleanupSuggestionRow(suggestion: $0) }
+                        }
+                    }
+                }
+            }
+            .overlay {
+                if model.suggestions.isEmpty {
+                    ContentUnavailableView("Nothing obvious to clean", systemImage: "sparkles",
+                                           description: Text("No large caches, build leftovers or old downloads were found here. Check Largest Files and Largest Folders for anything you no longer need."))
+                }
+            }
+        }
+    }
+}
+
+struct CleanupSuggestionRow: View {
+    @Environment(AppState.self) private var state
+    let suggestion: CleanupSuggestion
+
+    /// The first `command` in an instruction, for "Copy Command".
+    static func command(in text: String) -> String? {
+        let parts = text.split(separator: "`", omittingEmptySubsequences: false)
+        return parts.count >= 3 ? String(parts[1]) : nil
+    }
+
+    private var actionTitle: String {
+        switch suggestion.action {
+        case .trashItem: "Move to Trash…"
+        case .trashContents: "Clean…"
+        case .manual: "How to Clean"
+        }
+    }
+
+    var body: some View {
+        let model = state.diskUsage
+        HStack(alignment: .top, spacing: 10) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: suggestion.item.path))
+                .resizable()
+                .frame(width: 28, height: 28)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(suggestion.title).font(.headline)
+                    PriorityBadge(priority: suggestion.priority)
+                }
+                Text(suggestion.item.path.replacingOccurrences(of: AppPaths.home.path, with: "~"))
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                Text(suggestion.explanation)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if case .manual(let how) = suggestion.action {
+                    Label(how, systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 12)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(suggestion.item.size.formatted(.byteCount(style: .file)))
+                    .font(.title3.monospacedDigit().weight(.semibold))
+                HStack(spacing: 6) {
+                    Button("Reveal") { model.reveal(suggestion.item) }
+                    Button(actionTitle, role: suggestion.action == .trashItem || suggestion.action == .trashContents ? .destructive : nil) {
+                        model.clean(suggestion)
+                    }
+                    .disabled(model.isCleaning || (suggestion.action == .trashItem && model.trashRefusal(suggestion.item) != nil))
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.vertical, 4)
+        .contextMenu {
+            Button("Reveal in Finder") { model.reveal(suggestion.item) }
+            Button("Copy Path") { model.copyPath(suggestion.item) }
+            if suggestion.item.isDirectory { Button("Show in Folders") { model.open(suggestion.item) } }
+        }
+    }
+}
+
+struct PriorityBadge: View {
+    let priority: CleanupPriority
+
+    var body: some View {
+        Text(priority.title)
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 6).padding(.vertical, 1)
+            .background((priority == .safe ? Color.green : Color.orange).opacity(0.22), in: Capsule())
+            .foregroundStyle(priority == .safe ? Color.green : Color.orange)
     }
 }

@@ -8,6 +8,7 @@ import Observation
 @Observable
 final class DiskUsageModel {
     enum Tab: String, CaseIterable, Identifiable {
+        case cleanup = "Cleanup"
         case folders = "Folders"
         case largestFiles = "Largest Files"
         case largestFolders = "Largest Folders"
@@ -19,6 +20,12 @@ final class DiskUsageModel {
         let item: DiskItem
     }
 
+    /// "Move contents to Trash" for a suggestion like Caches, waiting for confirmation.
+    struct PendingEmpty: Identifiable {
+        let id = UUID()
+        let suggestion: CleanupSuggestion
+    }
+
     /// Folder being measured (home folder by default).
     var location: URL = AppPaths.home
     var report: DiskUsageReport?
@@ -28,6 +35,13 @@ final class DiskUsageModel {
     /// Folder whose contents the Folders tab shows (drill-down).
     var currentFolder: String?
     var pendingTrash: PendingTrash?
+    var pendingEmpty: PendingEmpty?
+    /// Folders and files that are usually safe or worthwhile to delete, most worthwhile first.
+    var suggestions: [CleanupSuggestion] = []
+    /// Suggestion per path, for badges in the other lists.
+    var suggestionByPath: [String: CleanupSuggestion] = [:]
+    var isCleaning = false
+    var infoMessage: String?
     var errorMessage: String?
 
     private var scanTask: Task<Void, Never>?
@@ -42,6 +56,8 @@ final class DiskUsageModel {
         guard !isScanning else { return }
         isScanning = true
         report = nil
+        suggestions = []
+        suggestionByPath = [:]
         currentFolder = nil
         progress = DiskUsageProgress(filesScanned: 0, bytesCounted: 0, currentFolder: location.path)
         let scanner = DiskUsageScanner(root: location)
@@ -52,13 +68,81 @@ final class DiskUsageModel {
             let result = scanner.scan { p in
                 Task { @MainActor in if self?.isScanning == true { self?.progress = p } }
             }
+            let suggestions = result.cancelled ? [] : CleanupAdvisor().suggestions(for: result)
             await MainActor.run {
                 guard let self else { return }
                 self.report = result
+                self.setSuggestions(suggestions)
+                self.tab = suggestions.isEmpty ? .folders : .cleanup
                 self.currentFolder = result.root
                 self.isScanning = false
                 self.progress = nil
                 self.logger.info("Disk usage scan \(result.cancelled ? "cancelled" : "finished"): \(result.fileCount) files, \(result.totalSize) bytes in \(result.duration)")
+            }
+        }
+    }
+
+    private func setSuggestions(_ list: [CleanupSuggestion]) {
+        suggestions = list
+        suggestionByPath = Dictionary(list.map { ($0.item.path, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Recomputes suggestions in the background after something was removed.
+    private func refreshSuggestions() {
+        guard let report else { return }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let list = CleanupAdvisor().suggestions(for: report)
+            await MainActor.run { self?.setSuggestions(list) }
+        }
+    }
+
+    func size(of priority: CleanupPriority) -> Int64 {
+        suggestions.filter { $0.priority == priority }.reduce(0) { $0 + $1.item.size }
+    }
+
+    /// Starts the clean-up action a suggestion calls for (always behind a confirmation).
+    func clean(_ suggestion: CleanupSuggestion) {
+        switch suggestion.action {
+        case .trashItem: requestTrash(suggestion.item)
+        case .trashContents: pendingEmpty = PendingEmpty(suggestion: suggestion)
+        case .manual(let how): infoMessage = how
+        }
+    }
+
+    /// Called only after the user confirms: moves everything inside the folder to the Trash, keeping the folder.
+    func confirmEmpty(_ pending: PendingEmpty) {
+        let folder = pending.suggestion.item
+        guard !isCleaning else { return }
+        isCleaning = true
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let fm = FileManager.default
+            let entries = (try? fm.contentsOfDirectory(at: folder.url, includingPropertiesForKeys: nil, options: [])) ?? []
+            var moved: [String] = []
+            var failed: [String] = []
+            for url in entries {
+                guard Uninstaller.isSafeToRemove(url.path) else { failed.append(url.path); continue }
+                do {
+                    try fm.trashItem(at: url, resultingItemURL: nil)
+                    moved.append(url.path)
+                } catch {
+                    failed.append(url.path)
+                }
+            }
+            await MainActor.run {
+                guard let self else { return }
+                self.isCleaning = false
+                self.logger.info("Disk usage: user moved \(moved.count) item(s) from \(folder.path) to Trash, \(failed.count) not moved")
+                if failed.isEmpty {
+                    self.report?.markEmptied(folder.path)
+                } else if let report = self.report {
+                    // Only what was really moved: known folders and listed files. Small files stay counted.
+                    let movedSet = Set(moved)
+                    for child in report.children(of: folder.path) where movedSet.contains(child.path) {
+                        self.report?.markRemoved(child)
+                    }
+                    self.errorMessage = "\(failed.count) of \(entries.count) items in \(folder.name) couldn't be moved (in use, or protected by macOS). Quit the apps that use them and try again."
+                }
+                self.refreshSuggestions()
             }
         }
     }
@@ -146,6 +230,7 @@ final class DiskUsageModel {
             var resulting: NSURL?
             try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
             report?.markRemoved(item)
+            refreshSuggestions()
             logger.info("Disk usage: user moved to Trash \(item.path) (\(item.size) bytes)")
         } catch {
             logger.error("Disk usage: Move to Trash failed for \(item.path): \(error.localizedDescription)")
