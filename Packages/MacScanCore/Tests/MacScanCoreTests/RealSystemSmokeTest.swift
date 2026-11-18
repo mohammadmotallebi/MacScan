@@ -1,0 +1,55 @@
+// Opt-in smoke test that scans your real /Applications (read-only, no ClamAV):
+//   MACSCAN_REAL_PROBE=/tmp/macscan-probe.txt swift test --filter realApplicationsProbe
+import Foundation
+import Testing
+@testable import MacScanCore
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_REAL_PROBE"] != nil))
+func realApplicationsProbe() async throws {
+    var settings = ScanSettings()
+    settings.enableClamAV = false
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+    let start = ContinuousClock.now
+    let session = await ScanCoordinator(engines: EngineFactory.makeEngines(settings: settings), settings: settings, logger: logger)
+        .run(targets: [.applications]) { _ in }
+    var out = "elapsed: \(ContinuousClock.now - start)\nstatus: \(session.status) items: \(session.itemsScanned)/\(session.itemsTotal) skipped: \(session.skippedCount) issues: \(session.issues.count)\n"
+    out += "threat: \(session.count(.threat)) warning: \(session.count(.warning)) clean: \(session.count(.clean))\nnotes: \(session.notes)\n"
+    for f in session.findings where f.severity > .clean { out += "\(f.severity) | \(f.engine.title) | \(f.reason) | \(f.path)\n" }
+    try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_REAL_PROBE"]!, atomically: true, encoding: .utf8)
+}
+
+// Opt-in: scan your real startup items (read-only, no ClamAV):
+//   MACSCAN_STARTUP_PROBE=/tmp/macscan-startup.txt swift test --filter realStartupItemsProbe
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_STARTUP_PROBE"] != nil))
+func realStartupItemsProbe() async throws {
+    var settings = ScanSettings()
+    settings.enableClamAV = false
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+    var targets: [ScanTarget] = [.startupItems]
+    if let extra = ProcessInfo.processInfo.environment["MACSCAN_EXTRA_PATH"] { targets.append(.path(URL(fileURLWithPath: extra))) }
+    let start = ContinuousClock.now
+    let session = await ScanCoordinator(engines: EngineFactory.makeEngines(settings: settings), settings: settings, logger: logger)
+        .run(targets: targets) { _ in }
+    var out = "elapsed: \(ContinuousClock.now - start) engines: \(session.enginesUsed.map(\.title))\n"
+    out += "threat: \(session.count(.threat)) warning: \(session.count(.warning)) clean: \(session.count(.clean)) items: \(session.itemsTotal)\n"
+    for f in session.findings where f.severity > .clean { out += "\(f.severity) | \(f.engine.title) | \(f.reason) | \(f.path)\n" }
+    out += "--- clean startup items:\n"
+    for f in session.findings where f.severity == .clean && f.engine == .persistence { out += "\(f.reason) | \(f.path)\n" }
+    try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_STARTUP_PROBE"]!, atomically: true, encoding: .utf8)
+}
+
+// Opt-in, read-only: list what uninstalling an app would remove (nothing is moved):
+//   MACSCAN_UNINSTALL_PROBE="/Applications/Foo.app" swift test --filter realUninstallProbe
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_UNINSTALL_PROBE"] != nil))
+func realUninstallProbe() throws {
+    for path in ProcessInfo.processInfo.environment["MACSCAN_UNINSTALL_PROBE"]!.split(separator: ":") {
+        guard let app = InstalledApp.load(URL(fileURLWithPath: String(path))) else { print("cannot load \(path)"); continue }
+        let plan = try LeftoverFinder().find(app)
+        print("=== \(app.name) \(app.bundleID ?? "-") team=\(app.teamID ?? "-") protected=\(app.protectionReason ?? "no") nested=\(app.nestedBundleIDs)")
+        print("jobs to stop: \(plan.launchJobs.map { "\($0.domain.rawValue)/\($0.label)" })")
+        print("processes: \(plan.processes.map { "\($0.pid) \($0.isOwnedByUser ? "user" : "root") \(($0.path as NSString).lastPathComponent)" })  receipts: \(plan.packageReceipts)")
+        for l in plan.leftovers {
+            print(String(format: "%-18@ %8.1f MB %@ %@  [%@]", l.category.rawValue as NSString, Double(l.size) / 1_048_576, l.requiresAdmin ? "🔒" : "  ", l.path, l.matchedBy))
+        }
+    }
+}
