@@ -105,4 +105,47 @@ import Testing
         #expect(report.unreadable.first?.hasSuffix("/locked") == true)
         #expect(report.fileCount == 1)
     }
+
+    @Test func largestFoldersIsFastAndSkipsPackageInsides() {
+        // 20,000 apps × (bundle + Contents + Resources) and 140,000 plain folders: ~200k folders.
+        typealias Folder = DiskUsageReport.Folder
+        var folders: [String: Folder] = ["/r": Folder()]
+        for i in 0..<20_000 {
+            let app = "/r/Apps/A\(i).app"
+            folders[app] = Folder(size: Int64(i), isPackage: true)
+            folders[app + "/Contents"] = Folder(size: Int64(i))
+            folders[app + "/Contents/Resources"] = Folder(size: 10_000_000)   // huge, but inside a package
+        }
+        for i in 0..<140_000 { folders["/r/Data/d\(i % 100)/f\(i)"] = Folder(size: Int64(i)) }
+        folders["/r/Apps"] = Folder(size: 1)
+        folders["/r/Data"] = Folder(size: 1)
+        for i in 0..<100 { folders["/r/Data/d\(i)"] = Folder(size: 1) }
+        folders["/r/Data/d7/f7/Deep.bundle"] = Folder(size: 9_999_999, isPackage: true)
+        folders["/r/Data/d7/f7/Deep.bundle/Contents"] = Folder(size: 9_999_999)
+
+        let start = ContinuousClock.now
+        let top = DiskUsageReport.computeTopFolders(folders, root: "/r", keep: 200)
+        let elapsed = ContinuousClock.now - start
+        #expect(elapsed < .seconds(2), "took \(elapsed)")
+        #expect(top.count == 200)
+        #expect(top.first == "/r/Data/d7/f7/Deep.bundle", "a package itself is listed")
+        #expect(!top.contains { $0.contains(".app/") || $0.contains(".bundle/") }, "nothing inside packages")
+        #expect(!top.contains("/r"))
+    }
+
+    @Test func largestFoldersCollapsesSingleChildChains() {
+        typealias Folder = DiskUsageReport.Folder
+        let folders: [String: Folder] = [
+            "/r": Folder(size: 1_000, childFolders: ["/r/Containers", "/r/Other"]),
+            "/r/Containers": Folder(size: 900, childFolders: ["/r/Containers/docker", "/r/Containers/small"]),
+            "/r/Containers/docker": Folder(size: 880, childFolders: ["/r/Containers/docker/vms"]),
+            "/r/Containers/docker/vms": Folder(size: 879),        // holds the big file itself
+            "/r/Containers/small": Folder(size: 20),
+            "/r/Other": Folder(size: 100, childFolders: ["/r/Other/a", "/r/Other/b"]),
+            "/r/Other/a": Folder(size: 60),
+            "/r/Other/b": Folder(size: 40),
+        ]
+        let top = DiskUsageReport.computeTopFolders(folders, root: "/r", keep: 10)
+        #expect(top == ["/r/Containers/docker/vms", "/r/Other", "/r/Other/a", "/r/Other/b", "/r/Containers/small"])
+    }
 }

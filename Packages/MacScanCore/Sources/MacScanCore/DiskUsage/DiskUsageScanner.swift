@@ -78,15 +78,38 @@ public struct DiskUsageReport: Sendable {
         return items
     }
 
+    /// Paths of the biggest folders (excluding the root and folders inside packages), computed once after the scan.
+    var topFolders: [String] = []
+
     /// The biggest folders anywhere under the root (excluding the root and folders inside packages).
+    /// Cheap: reads the list computed at the end of the scan, with current sizes.
     public func largestFolders(limit: Int = 100) -> [DiskItem] {
-        let packages = folders.filter { $0.value.isPackage }.keys.map { $0 + "/" }
-        return folders.keys
-            .filter { $0 != root && !packages.contains(where: $0.hasPrefix) }
-            .compactMap(folder)
-            .sorted { $0.size > $1.size }
-            .prefix(limit)
-            .map { $0 }
+        topFolders.compactMap(folder).sorted { $0.size > $1.size }.prefix(limit).map { $0 }
+    }
+
+    /// Picks the biggest folders in one pass (a folder that is ≥ 95% one sub-folder is left out in favour of that
+    /// sub-folder). A folder is inside a package if its parent is a package or is inside
+    /// one. Parents are visited before children (shorter paths first), so each check is a dictionary lookup.
+    /// (Checking every folder against every package path took minutes on a large home folder.)
+    static func computeTopFolders(_ folders: [String: Folder], root: String, keep: Int) -> [String] {
+        var insidePackage: [String: Bool] = [root: false]
+        insidePackage.reserveCapacity(folders.count)
+        var candidates: [(path: String, size: Int64)] = []
+        candidates.reserveCapacity(folders.count)
+        for path in folders.keys.sorted(by: { $0.count < $1.count }) where path != root {
+            let parent = (path as NSString).deletingLastPathComponent
+            let inside = (folders[parent]?.isPackage ?? false) || (insidePackage[parent] ?? false)
+            insidePackage[path] = inside
+            guard !inside, let folder = folders[path] else { continue }
+            // Skip a folder that is mostly one sub-folder (Containers › com.docker.docker › Data › vms): the
+            // sub-folder already stands for it, and a chain of near-identical sizes hides everything else.
+            // Packages are kept: they're shown as one item.
+            let biggestChild = folder.childFolders.compactMap { folders[$0]?.size }.max() ?? 0
+            if !folder.isPackage, folder.size > 0, Double(biggestChild) >= Double(folder.size) * 0.95 { continue }
+            candidates.append((path, folder.size))
+        }
+        candidates.sort { $0.size != $1.size ? $0.size > $1.size : $0.path < $1.path }
+        return candidates.prefix(keep).map(\.path)
     }
 
     /// Updates the report after the user moved an item to the Trash: subtracts its size from every folder above it.
@@ -118,6 +141,10 @@ public struct DiskUsageReport: Sendable {
             folderCount = folders.count
         }
         largestFiles.removeAll { $0.path == item.path }
+        if item.isDirectory {
+            let prefix = item.path + "/"
+            topFolders.removeAll { $0 == item.path || $0.hasPrefix(prefix) }
+        }
         totalSize -= item.size
         fileCount -= files
     }
@@ -208,6 +235,8 @@ public struct DiskUsageScanner: Sendable {
             let known = Set(report.folders.keys)
             for key in known { report.folders[key]?.childFolders.removeAll { !known.contains($0) } }
         }
+
+        report.topFolders = DiskUsageReport.computeTopFolders(report.folders, root: rootPath, keep: 200)
 
         top.sort { $0.size != $1.size ? $0.size > $1.size : $0.path < $1.path }
         report.largestFiles = Array(top.prefix(largestFileCount))
