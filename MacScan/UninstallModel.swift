@@ -14,6 +14,9 @@ final class UninstallModel {
     var apps: [InstalledApp] = []
     /// Apps already in the Trash (they can still have registered background items).
     var trashApps: [InstalledApp] = []
+    /// Apps that are already deleted, added by bundle ID / name so their leftovers can be found.
+    var removedApps: [InstalledApp] = []
+    var showingRemovedAppSheet = false
     /// Delete instead of moving to the Trash (items already in the Trash are always deleted).
     var deletePermanently = false
     var search = ""
@@ -33,6 +36,7 @@ final class UninstallModel {
     var selectedApp: InstalledApp? {
         guard let selectedAppID else { return nil }
         return apps.first { $0.id == selectedAppID } ?? trashApps.first { $0.id == selectedAppID }
+            ?? removedApps.first { $0.id == selectedAppID }
     }
 
     private func matches(_ app: InstalledApp) -> Bool {
@@ -42,6 +46,30 @@ final class UninstallModel {
 
     var filteredApps: [InstalledApp] { apps.filter(matches) }
     var filteredTrashApps: [InstalledApp] { trashApps.filter(matches) }
+    var filteredRemovedApps: [InstalledApp] { removedApps.filter(matches) }
+
+    /// Adds an already-deleted app by bundle ID and/or name and looks for its leftovers.
+    /// Returns an error message to show in the sheet, or nil on success.
+    func addRemovedApp(bundleID: String, name: String) -> String? {
+        let id = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if id.isEmpty && trimmedName.isEmpty { return "Enter the app's bundle ID, its name, or both." }
+        if !id.isEmpty && !InstalledApp.isPlausibleBundleID(id) {
+            return "“\(id)” doesn't look like a bundle ID. Bundle IDs look like com.vendor.AppName."
+        }
+        if !id.isEmpty, let installed = (apps + trashApps).first(where: { $0.bundleID?.caseInsensitiveCompare(id) == .orderedSame }) {
+            return "\(installed.name) is still \(installed.isInTrash ? "in the Trash" : "installed"). Select it in the list instead."
+        }
+        guard let app = InstalledApp.removed(bundleID: id, name: trimmedName) else {
+            return "Enter a bundle ID like com.vendor.AppName, or the app's name."
+        }
+        if let reason = app.protectionReason { return "MacScan won't remove this: \(reason)." }
+        removedApps.removeAll { $0.id == app.id }
+        removedApps.append(app)
+        selectedAppID = app.id
+        findLeftovers()
+        return nil
+    }
 
     /// True when the uninstall will delete (not move to Trash) the given item.
     func willDelete(_ item: Leftover) -> Bool {
@@ -141,7 +169,10 @@ final class UninstallModel {
             self.isUninstalling = false
             self.status = nil
             // Refresh: the app may be gone now, or leftovers may remain.
-            if let app = self.selectedApp, !FileManager.default.fileExists(atPath: app.id) {
+            if let app = self.selectedApp, app.isMissing {
+                // Look again so anything that couldn't be removed (e.g. protected by macOS) stays visible.
+                self.findLeftovers()
+            } else if let app = self.selectedApp, !FileManager.default.fileExists(atPath: app.id) {
                 self.apps.removeAll { $0.id == app.id }
                 self.trashApps.removeAll { $0.id == app.id }
                 self.selectedAppID = nil

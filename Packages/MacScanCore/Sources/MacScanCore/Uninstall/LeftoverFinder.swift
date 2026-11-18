@@ -59,6 +59,9 @@ public struct Leftover: Identifiable, Hashable, Sendable {
     public let launchDomain: LaunchDomain?
     /// Preselected in the checklist. False for lower-confidence matches (e.g. shared with the developer's other apps).
     public var selectedByDefault: Bool = true
+    /// Inside another app's Containers / Group Containers and currently not writable: macOS protects this data,
+    /// and an administrator password doesn't help. Removing it needs Full Disk Access for MacScan.
+    public var protectedByMacOS: Bool = false
 
     public var path: String { url.path }
 }
@@ -170,8 +173,10 @@ public struct LeftoverFinder: Sendable {
         var launchJobs: [LaunchJob] = []
         var notes: [String] = []
 
-        // The app itself.
-        leftovers.append(makeLeftover(app.url, .application, matchedBy: "The application bundle", byName: false, label: nil, domain: nil))
+        // The app itself (unless it's already gone).
+        if !app.isMissing {
+            leftovers.append(makeLeftover(app.url, .application, matchedBy: "The application bundle", byName: false, label: nil, domain: nil))
+        }
 
         // Launch agents / daemons: match by file name, label, or by what they launch.
         let launchDirs: [(URL, LeftoverCategory, LaunchDomain)] = [
@@ -272,6 +277,10 @@ public struct LeftoverFinder: Sendable {
                                                 byName: true, label: nil, domain: nil)
                         item.selectedByDefault = false
                         leftovers.append(item)
+                    } else if app.isMissing,
+                              let prefix = names.first(where: { n in ["_", " ", "-"].contains { plain.hasPrefix(n + $0) } }) {
+                        // A removed app's helpers can't be read from its bundle; folders like "<App>_Helper" stand in for them.
+                        leftovers.append(makeLeftover(url, category, matchedBy: "Starts with the app's name (\(prefix))", byName: true, label: nil, domain: nil))
                     }
                 }
             }
@@ -305,7 +314,11 @@ public struct LeftoverFinder: Sendable {
         }
 
         notes.append("Login items you added in System Settings › General › Login Items are removed by macOS once the app is gone; check that list afterwards.")
-        if app.bundleID == nil { notes.append("The app has no bundle identifier, so only name-based matches were possible.") }
+        if app.isMissing {
+            notes.insert("\(app.name) itself is already gone. These items were matched by \(app.bundleID == nil ? "its name only, so check each one" : "its bundle ID and name").", at: 0)
+        } else if app.bundleID == nil {
+            notes.append("The app has no bundle identifier, so only name-based matches were possible.")
+        }
 
         leftovers = Self.deduplicate(leftovers)
         for i in leftovers.indices { leftovers[i].size = Self.allocatedSize(of: leftovers[i].url) }
@@ -387,10 +400,20 @@ public struct LeftoverFinder: Sendable {
     }
 
     func makeLeftover(_ url: URL, _ category: LeftoverCategory, matchedBy: String, byName: Bool, label: String?, domain: LaunchDomain?) -> Leftover {
-        Leftover(
+        // Other apps' containers in the user's Library are guarded by macOS privacy protection, not file
+        // ownership: root is refused too, so never route them through the administrator step.
+        let appData = Self.isProtectedAppData(url.path, home: locations.home)
+        var item = Leftover(
             url: url, category: category, matchedBy: matchedBy, matchedByNameOnly: byName,
-            requiresAdmin: Self.requiresAdmin(url), size: 0, launchLabel: label, launchDomain: domain
+            requiresAdmin: appData ? false : Self.requiresAdmin(url), size: 0, launchLabel: label, launchDomain: domain
         )
+        item.protectedByMacOS = appData && Self.requiresAdmin(url)
+        return item
+    }
+
+    /// Items directly or deeper inside `~/Library/Containers` or `~/Library/Group Containers`.
+    public static func isProtectedAppData(_ path: String, home: URL) -> Bool {
+        ["Library/Containers/", "Library/Group Containers/"].contains { path.hasPrefix(home.appendingPathComponent($0).path + "/") }
     }
 
     /// Moving an item needs write access to its parent, and for directories to the directory itself.

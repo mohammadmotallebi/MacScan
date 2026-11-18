@@ -55,9 +55,13 @@ public struct UninstallReport: Sendable {
         case deleted
         case failed(String)
         case skipped(String)
+        /// macOS privacy protection refused access (other apps' containers). Full Disk Access is needed.
+        case blockedByMacOS
 
         public var succeeded: Bool { self == .movedToTrash || self == .deleted }
     }
+
+    public static let blockedExplanation = "macOS protects other apps' data in Containers and Group Containers, even from an administrator. Give MacScan Full Disk Access and uninstall again, or drag the item to the Trash in Finder."
 
     public var appName: String
     public var results: [(leftover: Leftover, outcome: Outcome)] = []
@@ -70,6 +74,7 @@ public struct UninstallReport: Sendable {
     public var deletedCount: Int { results.filter { $0.outcome == .deleted }.count }
     public var removedCount: Int { movedCount + deletedCount }
     public var failures: [(leftover: Leftover, outcome: Outcome)] { results.filter { !$0.outcome.succeeded } }
+    public var blockedByMacOS: [Leftover] { results.filter { $0.outcome == .blockedByMacOS }.map(\.leftover) }
     public var freedBytes: Int64 { results.filter { $0.outcome.succeeded }.reduce(0) { $0 + $1.leftover.size } }
 }
 
@@ -164,7 +169,11 @@ public struct Uninstaller: Sendable {
                     logger.info("Uninstall: moved to Trash \(item.path)")
                 }
             } catch {
-                if PermissionErrors.isPermissionDenied(error) {
+                if PermissionErrors.isPermissionDenied(error), LeftoverFinder.isProtectedAppData(item.path, home: home) {
+                    // Root is refused here too, so the administrator step wouldn't help.
+                    report.results.append((item, .blockedByMacOS))
+                    logger.warning("Uninstall: blocked by macOS privacy protection \(item.path)")
+                } else if PermissionErrors.isPermissionDenied(error) {
                     adminItems.append(item)
                 } else {
                     report.results.append((item, .failed(error.localizedDescription)))
@@ -211,6 +220,9 @@ public struct Uninstaller: Sendable {
         }
 
         report.notes += plan.notes
+        if !report.blockedByMacOS.isEmpty {
+            report.notes.insert(UninstallReport.blockedExplanation, at: 0)
+        }
         if report.results.contains(where: { $0.outcome == .movedToTrash }) {
             report.notes.append("Moved items are in the Trash. Items that needed your password can't use Finder's “Put Back”; drag them back if you need to restore them.")
             if report.results.contains(where: { $0.outcome == .movedToTrash && $0.leftover.category == .application }) {
@@ -220,6 +232,9 @@ public struct Uninstaller: Sendable {
         logger.info("Uninstall \(plan.app.name) finished: \(report.movedCount) moved to Trash, \(report.deletedCount) deleted, \(report.failures.count) not removed")
         return report
     }
+
+    /// The user's home folder (the Trash's parent), so tests with a fake Trash get a matching fake home.
+    private var home: URL { trashDirectory.deletingLastPathComponent() }
 
     private func isInTrash(_ path: String) -> Bool {
         path.hasPrefix(trashDirectory.path + "/")

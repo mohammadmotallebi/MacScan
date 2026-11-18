@@ -17,6 +17,35 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
     /// Executable names of nested helpers that start with the app's name (e.g. `CleanMyMac_5_HealthMonitor`).
     /// Helpers often create support folders, crash caches and crash reports under these names.
     public var helperNames: [String] = []
+    /// The app bundle is already gone; only its leftovers (found by bundle ID and name) can be removed.
+    public var isMissing: Bool = false
+
+    /// Describes an app that has already been deleted, so its leftovers can still be found.
+    /// Returns nil when neither a usable bundle ID nor a usable name is given.
+    public static func removed(bundleID rawID: String?, name rawName: String?) -> InstalledApp? {
+        let id = rawID?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        let name = rawName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+        if let id, !isPlausibleBundleID(id) { return nil }
+        let lastComponent = id.flatMap { $0.split(separator: ".").last.map(String.init) }
+        guard let display = name ?? lastComponent else { return nil }
+        var names: [String] = []
+        for n in [name, lastComponent].compactMap({ $0 }) where !names.contains(n) { names.append(n) }
+        var protection: String?
+        if let id, id.lowercased().hasPrefix("com.apple.") { protection = "Part of macOS" }
+        if let id, id == Bundle.main.bundleIdentifier { protection = "This is MacScan itself" }
+        // A path that never exists, unique per bundle ID / name, so it can't collide with a real app in the list.
+        let key = (id ?? display).replacingOccurrences(of: "/", with: "-")
+        let placeholder = URL(fileURLWithPath: "/.macscan-removed-apps").appendingPathComponent(key + ".app")
+        return InstalledApp(url: placeholder, name: display, bundleID: id, version: nil, teamID: nil,
+                            nestedBundleIDs: [], names: names, protectionReason: protection, isMissing: true)
+    }
+
+    /// Reverse-DNS with at least three components, e.g. `com.vendor.App`.
+    public static func isPlausibleBundleID(_ id: String) -> Bool {
+        let parts = id.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count >= 3, parts.allSatisfy({ !$0.isEmpty }) else { return false }
+        return id.allSatisfy { $0.isLetter || $0.isNumber || $0 == "." || $0 == "-" || $0 == "_" }
+    }
 
     public var isProtected: Bool { protectionReason != nil }
 
@@ -128,7 +157,7 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    public var isInTrash: Bool { url.path.hasPrefix(AppPaths.home.path + "/.Trash/") }
+    public var isInTrash: Bool { !isMissing && url.path.hasPrefix(AppPaths.home.path + "/.Trash/") }
 
     /// Apps in /Applications (including one level of subfolders) and ~/Applications.
     public static func listInstalled(folders: [URL] = FileEnumerator.applicationFolders) -> [InstalledApp] {
@@ -156,4 +185,8 @@ public struct InstalledApp: Identifiable, Hashable, Sendable {
         }
         return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

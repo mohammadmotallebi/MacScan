@@ -482,3 +482,112 @@ final class RecordingAdminRunner: AdminRunner, @unchecked Sendable {
         #expect(LeftoverFinder.otherVersionIdentifier("x2", ids: ["x1"]) == nil)
     }
 }
+
+/// Leftovers of apps that are already deleted, and app data that macOS privacy protection guards.
+@Suite(.serialized) struct RemovedAppAndProtectedDataTests {
+    @Test func removedAppFactory() throws {
+        let byID = try #require(InstalledApp.removed(bundleID: " com.macpaw.CleanMyMac5 ", name: nil))
+        #expect(byID.isMissing && !byID.isInTrash)
+        #expect(byID.bundleID == "com.macpaw.CleanMyMac5")
+        #expect(byID.name == "CleanMyMac5")
+        #expect(byID.protectionReason == nil)
+
+        let both = try #require(InstalledApp.removed(bundleID: "com.macpaw.CleanMyMac5", name: "CleanMyMac_5"))
+        #expect(both.name == "CleanMyMac_5")
+        #expect(both.names == ["CleanMyMac_5", "CleanMyMac5"])
+
+        let nameOnly = try #require(InstalledApp.removed(bundleID: "", name: "Old Tool"))
+        #expect(nameOnly.bundleID == nil && nameOnly.allBundleIDs.isEmpty)
+
+        #expect(InstalledApp.removed(bundleID: nil, name: "  ") == nil)
+        #expect(InstalledApp.removed(bundleID: "notabundleid", name: "X") == nil)
+        #expect(InstalledApp.removed(bundleID: "com..x", name: nil) == nil)
+        #expect(InstalledApp.removed(bundleID: "com.x.has space", name: nil) == nil)
+        #expect(InstalledApp.removed(bundleID: "com.apple.Safari", name: nil)?.protectionReason == "Part of macOS")
+    }
+
+    @Test func findsLeftoversOfRemovedApp() throws {
+        let root = try TempDir()
+        let home = try TempDir()
+        let id = "com.example.Gone5"
+        try home.write("Library/Application Support/\(id)/data", "x")
+        try home.write("Library/Caches/\(id).Helper/c", "x")
+        try home.write("Library/Preferences/\(id).plist", "x")
+        try home.write("Library/Group Containers/ABCDE12345.\(id)/x", "x")
+        try home.write("Library/Group Containers/ABCDE12345.com.example.Gone4/x", "x")       // other version
+        try home.write("Library/Application Support/Gone_App_Monitor/state", "x")             // helper by name prefix
+        try home.write("Library/Caches/SentryCrash/Gone_App/r", "x")
+        try home.write("Library/Logs/DiagnosticReports/Gone_App_Monitor_2026-11-17-1157_Mac.diag", "x")
+        // Look-alikes that must stay.
+        try home.write("Library/Application Support/Gone_Application/x", "x")
+        try home.write("Library/Application Support/com.example.GoneX/x", "x")
+        try home.write("Library/Caches/SentryCrash/Other/r", "x")
+        // Version-number variants are listed, but unticked.
+        try home.write("Library/Application Support/com.example.Gone50/x", "x")
+
+        let app = try #require(InstalledApp.removed(bundleID: id, name: "Gone_App"))
+        let finder = LeftoverFinder(locations: UninstallLocations(home: home.url, root: root.url, isRealSystem: false), backgroundItems: [])
+        let plan = try finder.find(app)
+        let found = Set(plan.leftovers.map { $0.path.replacingOccurrences(of: home.url.path, with: "~") })
+        let expected: Set<String> = [
+            "~/Library/Application Support/\(id)",
+            "~/Library/Caches/\(id).Helper",
+            "~/Library/Preferences/\(id).plist",
+            "~/Library/Group Containers/ABCDE12345.\(id)",
+            "~/Library/Group Containers/ABCDE12345.com.example.Gone4",
+            "~/Library/Application Support/Gone_App_Monitor",
+            "~/Library/Caches/SentryCrash/Gone_App",
+            "~/Library/Logs/DiagnosticReports/Gone_App_Monitor_2026-11-17-1157_Mac.diag",
+            "~/Library/Application Support/com.example.Gone50",
+        ]
+        #expect(found == expected, "missing: \(expected.subtracting(found)) extra: \(found.subtracting(expected))")
+        let unticked = Set(plan.leftovers.filter { !$0.selectedByDefault }.map { ($0.path as NSString).lastPathComponent })
+        #expect(unticked == ["ABCDE12345.com.example.Gone4", "com.example.Gone50"])
+        #expect(!plan.leftovers.contains { $0.category == .application }, "no app bundle row for a removed app")
+        #expect(plan.notes.first?.contains("already gone") == true)
+        #expect(plan.leftovers.first { $0.path.hasSuffix("Gone_App_Monitor") }?.matchedByNameOnly == true)
+    }
+
+    @Test func protectedContainerIsReportedNotSentToAdmin() async throws {
+        let dir = try TempDir()
+        let home = dir.url.appendingPathComponent("home")
+        let trash = home.appendingPathComponent(".Trash")
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        let groups = home.appendingPathComponent("Library/Group Containers")
+        let container = groups.appendingPathComponent("ABCDE12345.com.example.Gone5")
+        try "x".write(to: container.appendingPathComponent("x"), createDirs: true)
+        let prefs = try dir.write("home/Library/Preferences/com.example.Gone5.plist", "x")
+
+        // Simulate macOS refusing access: the parent folder isn't writable, so moving the container fails with EACCES.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: groups.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: groups.path) }
+
+        let app = try #require(InstalledApp.removed(bundleID: "com.example.Gone5", name: nil))
+        let finder = LeftoverFinder(locations: UninstallLocations(home: home, root: dir.url.appendingPathComponent("root"), isRealSystem: false), backgroundItems: [])
+        let plan = try finder.find(app)
+        let item = try #require(plan.leftovers.first { $0.path == container.path })
+        #expect(item.protectedByMacOS)
+        #expect(!item.requiresAdmin, "an admin password can't get past privacy protection")
+
+        let admin = RecordingAdminRunner()
+        let report = try await Uninstaller(trasher: FolderTrasher(folder: dir.url.appendingPathComponent("FakeTrash")), admin: admin,
+                                           logger: FileLogger(directory: dir.url.appendingPathComponent("logs")),
+                                           trashDirectory: trash, manageProcesses: false)
+            .uninstall(plan, selected: Set(plan.leftovers.map(\.path)))
+
+        #expect(report.blockedByMacOS.map(\.path) == [container.path])
+        #expect(report.results.first { $0.leftover.path == prefs.path }?.outcome == .movedToTrash)
+        #expect(admin.scripts.isEmpty, "no password prompt for protected app data")
+        #expect(report.notes.first == UninstallReport.blockedExplanation)
+        #expect(FileManager.default.fileExists(atPath: container.path))
+    }
+
+    @Test func protectedAppDataPaths() {
+        let home = URL(fileURLWithPath: "/Users/u")
+        #expect(LeftoverFinder.isProtectedAppData("/Users/u/Library/Group Containers/X.com.a.b", home: home))
+        #expect(LeftoverFinder.isProtectedAppData("/Users/u/Library/Containers/com.a.b/Data", home: home))
+        #expect(!LeftoverFinder.isProtectedAppData("/Users/u/Library/Group Containers", home: home))
+        #expect(!LeftoverFinder.isProtectedAppData("/Users/u/Library/Caches/com.a.b", home: home))
+        #expect(!LeftoverFinder.isProtectedAppData("/Library/Containers/com.a.b", home: home))
+    }
+}

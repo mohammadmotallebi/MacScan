@@ -1,4 +1,5 @@
 import MacScanCore
+import UniformTypeIdentifiers
 import SwiftUI
 
 struct UninstallView: View {
@@ -21,6 +22,11 @@ struct UninstallView: View {
                             ForEach(model.filteredTrashApps) { app in AppRow(app: app) }
                         }
                     }
+                    if !model.filteredRemovedApps.isEmpty {
+                        Section("Already Removed") {
+                            ForEach(model.filteredRemovedApps) { app in AppRow(app: app) }
+                        }
+                    }
                 }
                 .overlay {
                     if model.isLoadingApps && model.apps.isEmpty { ProgressView("Loading apps…") }
@@ -28,6 +34,8 @@ struct UninstallView: View {
                 Divider()
                 HStack {
                     Button("Choose App…") { model.chooseApp() }
+                    Button("Already Removed App…") { model.showingRemovedAppSheet = true }
+                        .help("Find the leftovers of an app you've already deleted, by its bundle ID or name")
                     Spacer()
                     Button {
                         model.loadApps()
@@ -75,6 +83,9 @@ struct UninstallView: View {
         .sheet(item: $model.result) { result in
             UninstallReportSheet(report: result.report)
         }
+        .sheet(isPresented: $model.showingRemovedAppSheet) {
+            RemovedAppSheet()
+        }
         .alert("Uninstall", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("OK") {}
         } message: {
@@ -88,12 +99,14 @@ struct AppRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: app.url.path))
+            Image(nsImage: app.icon)
                 .resizable()
                 .frame(width: 24, height: 24)
+                .opacity(app.isMissing ? 0.5 : 1)
             VStack(alignment: .leading, spacing: 1) {
                 Text(app.name).lineLimit(1)
-                Text(app.isInTrash ? "In the Trash" : (app.version.map { "Version \($0)" } ?? (app.bundleID ?? "")))
+                Text(app.isMissing ? "Already removed\(app.bundleID.map { " · \($0)" } ?? "")"
+                     : app.isInTrash ? "In the Trash" : (app.version.map { "Version \($0)" } ?? (app.bundleID ?? "")))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -130,14 +143,16 @@ struct UninstallPlanView: View {
         VStack(spacing: 0) {
             // Header
             HStack(spacing: 12) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: plan.app.url.path))
+                Image(nsImage: plan.app.icon)
                     .resizable()
                     .frame(width: 48, height: 48)
+                    .opacity(plan.app.isMissing ? 0.5 : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(plan.app.name).font(.title2.weight(.semibold))
                     Text([plan.app.version.map { "Version \($0)" }, plan.app.bundleID].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
-                    Text(CodeSigning.status(of: plan.app.url).description)
+                    Text(plan.app.isMissing ? "The app is already removed. These are the files it left behind."
+                                            : CodeSigning.status(of: plan.app.url).description)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
@@ -164,6 +179,27 @@ struct UninstallPlanView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.bottom, 8)
+            }
+            if plan.leftovers.isEmpty {
+                Label("Nothing found for \(plan.app.name). Check the bundle ID or try the app's name.", systemImage: "magnifyingglass")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+            }
+            if plan.leftovers.contains(where: \.protectedByMacOS) {
+                HStack(alignment: .firstTextBaseline) {
+                    Label("Some items are in other apps' protected containers. macOS blocks removing them, even with your password, unless MacScan has Full Disk Access.",
+                          systemImage: "hand.raised.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Full Disk Access…") { FullDiskAccess.openSettings() }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
             if !plan.processes.isEmpty {
                 Label("\(plan.app.name) is running (\(plan.processes.count) process\(plan.processes.count == 1 ? "" : "es")). It will be quit first.", systemImage: "exclamationmark.triangle.fill")
@@ -277,7 +313,10 @@ struct LeftoverRow: View {
                     .background(.yellow.opacity(0.25), in: Capsule())
                     .help("Matched only because it has the app's name — check it belongs to this app")
             }
-            if item.requiresAdmin || item.launchDomain == .system {
+            if item.protectedByMacOS {
+                Image(systemName: "hand.raised.fill").foregroundStyle(.orange)
+                    .help("Protected by macOS privacy protection. MacScan needs Full Disk Access to remove this; an administrator password doesn't help.")
+            } else if item.requiresAdmin || item.launchDomain == .system {
                 Image(systemName: "lock.fill").foregroundStyle(.secondary).help("Needs your administrator password")
             }
             Text(item.size > 0 ? item.size.formatted(.byteCount(style: .file)) : "—")
@@ -322,17 +361,31 @@ struct UninstallReportSheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(report.failures.enumerated()), id: \.offset) { _, entry in
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(entry.leftover.path).font(.caption.monospaced()).textSelection(.enabled)
-                                Text(describe(entry.outcome)).font(.caption).foregroundStyle(.secondary)
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(entry.leftover.path).font(.caption.monospaced()).textSelection(.enabled)
+                                    Text(describe(entry.outcome)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if FileManager.default.fileExists(atPath: entry.leftover.path) {
+                                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([entry.leftover.url]) }
+                                        .controlSize(.small)
+                                }
                             }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .frame(maxHeight: 160)
-                Text("Items inside other apps' containers may need Full Disk Access for MacScan.")
-                    .font(.caption).foregroundStyle(.secondary)
+                if !report.blockedByMacOS.isEmpty {
+                    HStack {
+                        Text("Give MacScan Full Disk Access, quit and reopen it, then uninstall again. Or drag the items to the Trash in Finder.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Full Disk Access…") { FullDiskAccess.openSettings() }
+                    }
+                }
             }
 
             ForEach(Array(report.notes.enumerated()), id: \.offset) { _, note in
@@ -361,6 +414,58 @@ struct UninstallReportSheet: View {
         case .deleted: "Deleted"
         case .failed(let why): "Failed: \(why)"
         case .skipped(let why): "Skipped: \(why)"
+        case .blockedByMacOS: "Blocked by macOS privacy protection (needs Full Disk Access)"
         }
+    }
+}
+
+/// Asks for the bundle ID and/or name of an app that's already deleted.
+struct RemovedAppSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var bundleID = ""
+    @State private var name = ""
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Find Leftovers of a Removed App").font(.title3.weight(.semibold))
+            Text("Deleted apps often leave settings, caches, helpers and background items behind. Enter what you know about the app, and MacScan lists those files for you to review. Nothing is removed until you confirm.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Form {
+                TextField("Bundle ID", text: $bundleID, prompt: Text("com.vendor.AppName"))
+                TextField("Name", text: $name, prompt: Text("App name, e.g. CleanMyMac_5"))
+            }
+            .formStyle(.columns)
+            Text("The bundle ID gives the most reliable results. It's often the name of a folder in ~/Library/Application Support or ~/Library/Preferences. Without it, MacScan matches by name only, so check each item.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Find Leftovers") {
+                    if let message = state.uninstall.addRemovedApp(bundleID: bundleID, name: name) {
+                        error = message
+                    } else {
+                        dismiss()
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(bundleID.trimmingCharacters(in: .whitespaces).isEmpty && name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(24)
+        .frame(width: 480)
+    }
+}
+
+extension InstalledApp {
+    /// The app's icon, or the generic app icon when the app is already removed.
+    var icon: NSImage {
+        isMissing ? NSWorkspace.shared.icon(for: .application) : NSWorkspace.shared.icon(forFile: url.path)
     }
 }
