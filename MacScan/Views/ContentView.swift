@@ -18,6 +18,8 @@ struct ContentView: View {
                     .tag(AppSection.history)
                 Label("Uninstall", systemImage: "trash.square")
                     .tag(AppSection.uninstall)
+                Label("Disk Usage", systemImage: "chart.bar.doc.horizontal")
+                    .tag(AppSection.diskUsage)
             }
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
             .onChange(of: state.selectedSection) { _, newValue in
@@ -32,6 +34,7 @@ struct ContentView: View {
                 case .scan: ScanView()
                 case .history: HistoryView()
                 case .uninstall: UninstallView()
+                case .diskUsage: DiskUsageView()
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
@@ -42,12 +45,23 @@ struct ContentView: View {
                     state.uninstall.open(app)
                     return true
                 }
+                // In Disk Usage a dropped folder is measured.
+                if state.selectedSection == .diskUsage {
+                    guard !state.diskUsage.isScanning,
+                          let folder = urls.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }) else { return false }
+                    state.diskUsage.scan(folder)
+                    return true
+                }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true
             } isTargeted: { dropTargeted = $0 }
             .overlay {
-                if dropTargeted { DropOverlay(isScanning: state.isScanning, uninstallMode: state.selectedSection == .uninstall) }
+                if dropTargeted {
+                    DropOverlay(isScanning: state.selectedSection == .diskUsage ? state.diskUsage.isScanning : state.isScanning,
+                                uninstallMode: state.selectedSection == .uninstall,
+                                measureMode: state.selectedSection == .diskUsage)
+                }
             }
         }
         .sheet(item: $state.fdaPrompt) { prompt in
@@ -98,6 +112,7 @@ struct ContentView: View {
 struct DropOverlay: View {
     let isScanning: Bool
     var uninstallMode = false
+    var measureMode = false
 
     private var blocked: Bool { isScanning && !uninstallMode }
 
@@ -109,9 +124,10 @@ struct DropOverlay: View {
                 .strokeBorder(style: StrokeStyle(lineWidth: 3, dash: [10, 6]))
                 .foregroundStyle(blocked ? Color.secondary : Color.accentColor)
             VStack(spacing: 12) {
-                Image(systemName: blocked ? "hourglass" : (uninstallMode ? "trash.square" : "arrow.down.doc"))
+                Image(systemName: blocked ? "hourglass" : (uninstallMode ? "trash.square" : (measureMode ? "chart.bar.doc.horizontal" : "arrow.down.doc")))
                     .font(.system(size: 48, weight: .light))
-                Text(blocked ? "A scan is already running" : (uninstallMode ? "Drop an app to uninstall" : "Drop to scan"))
+                Text(blocked ? (measureMode ? "Already measuring" : "A scan is already running")
+                     : (uninstallMode ? "Drop an app to uninstall" : (measureMode ? "Drop a folder to measure" : "Drop to scan")))
                     .font(.title2.weight(.semibold))
             }
             .foregroundStyle(blocked ? Color.secondary : Color.accentColor)

@@ -241,7 +241,7 @@ public struct Uninstaller: Sendable {
     }
 
     /// Last line of defence: never remove top-level or system locations, whatever the plan says.
-    static func isSafeToRemove(_ path: String) -> Bool {
+    public static func isSafeToRemove(_ path: String) -> Bool {
         let url = URL(fileURLWithPath: path).standardizedFileURL
         let components = url.pathComponents.filter { $0 != "/" }
         guard components.count >= 2 else { return false }

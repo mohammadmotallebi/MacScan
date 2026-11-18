@@ -48,6 +48,12 @@ struct MacScanApp: App {
                     state.uninstall.chooseApp()
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
+                Button("Find Big Folders and Files") {
+                    state.selectedSection = .diskUsage
+                    if state.diskUsage.report == nil { state.diskUsage.scan() }
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+                .disabled(state.diskUsage.isScanning)
                 Divider()
                 Button("Cancel Scan") { state.cancelScan() }
                     .keyboardShortcut(".", modifiers: [.command])
