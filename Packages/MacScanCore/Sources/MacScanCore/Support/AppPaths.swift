@@ -1,8 +1,23 @@
 import Foundation
+import os
 
 /// Well-known locations used by MacScan. All are created on first access.
 public enum AppPaths {
-    public static var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+    /// The user whose files are scanned. Normally the current user; an elevated (root) scan worker
+    /// sets it to the user who started the scan so ~/Applications, startup items and crontab stay theirs.
+    private static let targetUser = OSAllocatedUnfairLock<(home: URL, name: String)?>(initialState: nil)
+
+    public static func setTargetUser(home: URL, name: String) {
+        targetUser.withLock { $0 = (home, name) }
+    }
+
+    public static var home: URL {
+        targetUser.withLock { $0?.home } ?? FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    public static var userName: String {
+        targetUser.withLock { $0?.name } ?? NSUserName()
+    }
 
     public static var applicationSupport: URL {
         ensure(home.appendingPathComponent("Library/Application Support/MacScan", isDirectory: true))

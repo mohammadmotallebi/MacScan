@@ -81,6 +81,15 @@ struct ScanControlsPanel: View {
                             Label("Scan File or Folder…", systemImage: "doc.viewfinder")
                                 .frame(maxWidth: .infinity)
                         }
+
+                        Divider().padding(.vertical, 2)
+                        Toggle(isOn: Bindable(state).settings.elevatedScans) {
+                            Label("Scan as administrator", systemImage: "lock.open")
+                        }
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help("Asks for your administrator password at the start of each scan, then reads files owned by other users and the system. Mail, Safari and other privacy-protected data still need Full Disk Access.")
                     }
                     .disabled(state.isScanning)
                     .padding(4)

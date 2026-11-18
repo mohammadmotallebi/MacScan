@@ -233,7 +233,7 @@ public struct PersistenceScanner: Sendable {
 
         // The user's crontab.
         if locations.includeCrontab, let crontab = Self.readUserCrontab() {
-            let source = "/usr/lib/cron/tabs/\(NSUserName())"
+            let source = "/usr/lib/cron/tabs/\(AppPaths.userName)"
             let jobs = crontab.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty && !$0.hasPrefix("#") }
             for job in jobs {
@@ -277,7 +277,8 @@ public struct PersistenceScanner: Sendable {
     static func readUserCrontab() -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/crontab")
-        p.arguments = ["-l"]
+        // As root (elevated scan), read the scanning user's crontab, not root's.
+        p.arguments = getuid() == 0 && AppPaths.userName != "root" ? ["-l", "-u", AppPaths.userName] : ["-l"]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice

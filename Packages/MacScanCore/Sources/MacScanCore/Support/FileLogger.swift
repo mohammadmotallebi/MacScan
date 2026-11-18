@@ -5,13 +5,16 @@ import os
 public final class FileLogger: @unchecked Sendable {
     public static let shared = FileLogger()
 
-    public enum Level: String, Sendable {
+    public enum Level: String, Codable, Sendable {
         case info = "INFO"
         case warning = "WARN"
         case error = "ERROR"
     }
 
     public let fileURL: URL
+    /// When set, lines go here instead of the log file (used by the root scan worker, which must not
+    /// create root-owned files in the user's ~/Library/Logs).
+    private let sink: (@Sendable (Level, String) -> Void)?
     private let queue = DispatchQueue(label: "MacScan.FileLogger")
     private let osLog = Logger(subsystem: "MacScan", category: "scanner")
     private let maxBytes: UInt64 = 5 * 1024 * 1024
@@ -25,6 +28,13 @@ public final class FileLogger: @unchecked Sendable {
         let dir = directory ?? AppPaths.logs
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         fileURL = dir.appendingPathComponent("MacScan.log")
+        sink = nil
+    }
+
+    /// A logger that forwards every line to `sink` and never touches the disk.
+    public init(forwardingTo sink: @escaping @Sendable (Level, String) -> Void) {
+        fileURL = URL(fileURLWithPath: "/dev/null")
+        self.sink = sink
     }
 
     public func info(_ message: String) { log(.info, message) }
@@ -32,6 +42,10 @@ public final class FileLogger: @unchecked Sendable {
     public func error(_ message: String) { log(.error, message) }
 
     public func log(_ level: Level, _ message: String) {
+        if let sink {
+            sink(level, message)
+            return
+        }
         switch level {
         case .info: osLog.info("\(message, privacy: .public)")
         case .warning: osLog.warning("\(message, privacy: .public)")

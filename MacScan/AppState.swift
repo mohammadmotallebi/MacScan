@@ -185,15 +185,38 @@ final class AppState {
             settings: settings,
             ignoreList: ignoreList
         )
+        let onProgress: @Sendable (ScanProgress) -> Void = { progress in
+            Task { @MainActor in
+                guard self.isScanning else { return }
+                self.progress = progress
+            }
+        }
 
         // AppState lives for the whole app lifetime, so strong captures are fine here.
-        scanTask = Task {
-            let session = await coordinator.run(targets: targets) { progress in
-                Task { @MainActor in
-                    guard self.isScanning else { return }
-                    self.progress = progress
+        if settings.elevatedScans, let executable = Bundle.main.executableURL {
+            let request = ElevatedScanRequest.make(targets: targets, settings: settings, ignoreList: ignoreList)
+            progress?.status = "Waiting for your administrator password…"
+            logger.info("Starting administrator scan")
+            scanTask = Task {
+                do {
+                    let session = try await ElevatedScanLauncher(executable: executable).run(request, onProgress: onProgress)
+                    // VirusTotal runs here, as the user: the root worker never sees the API key.
+                    self.scanFinished(await coordinator.lookUpFlagged(in: session, onProgress: onProgress))
+                } catch {
+                    self.logger.warning("Administrator scan did not run: \(error.localizedDescription)")
+                    self.isScanning = false
+                    self.progress = nil
+                    self.scanTask = nil
+                    if error as? ElevatedScanError != .passwordCancelled {
+                        self.alert = AppAlert(title: "Administrator scan failed", message: error.localizedDescription)
+                    }
                 }
             }
+            return
+        }
+
+        scanTask = Task {
+            let session = await coordinator.run(targets: targets, onProgress: onProgress)
             self.scanFinished(session)
         }
     }

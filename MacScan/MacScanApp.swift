@@ -2,7 +2,20 @@ import AppKit
 import MacScanCore
 import SwiftUI
 
+/// Entry point. `--macscan-elevated-scan` runs the headless root scan worker (launched by an
+/// administrator scan behind the password prompt) instead of the app.
 @main
+enum MacScanMain {
+    @MainActor
+    static func main() {
+        let args = CommandLine.arguments
+        if args.count > 1, args[1] == ElevatedScanWorker.flag {
+            exit(ElevatedScanWorker.main(arguments: Array(args.dropFirst(2))))
+        }
+        MacScanApp.main()
+    }
+}
+
 struct MacScanApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var state = AppState()

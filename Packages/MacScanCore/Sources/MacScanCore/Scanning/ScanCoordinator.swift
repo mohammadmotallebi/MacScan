@@ -1,7 +1,7 @@
 import Foundation
 
-public struct ScanProgress: Sendable, Equatable {
-    public enum Phase: String, Sendable, Equatable {
+public struct ScanProgress: Codable, Sendable, Equatable {
+    public enum Phase: String, Codable, Sendable, Equatable {
         case enumerating = "Collecting files…"
         case scanning = "Scanning…"
         case lookingUp = "Looking up hashes on VirusTotal…"
@@ -171,11 +171,24 @@ public struct ScanCoordinator: Sendable {
             findings.append(Finding(path: unit, severity: .clean, engine: .scanner, reason: "No issues found", detail: "Checked by: \(engineNames)", unitPath: unit))
         }
 
-        findings.sort { a, b in
-            a.severity != b.severity ? a.severity > b.severity : a.path.localizedStandardCompare(b.path) == .orderedAscending
-        }
+        findings.sort(by: Self.displayOrder)
         session.findings = findings
         return finish(&session, status: cancelled ? .cancelled : .completed)
+    }
+
+    static func displayOrder(_ a: Finding, _ b: Finding) -> Bool {
+        a.severity != b.severity ? a.severity > b.severity : a.path.localizedStandardCompare(b.path) == .orderedAscending
+    }
+
+    /// Step 5 on its own, for a session scanned by the elevated (root) worker, which never sees the API key.
+    public func lookUpFlagged(in session: ScanSession, onProgress: @escaping @Sendable (ScanProgress) -> Void) async -> ScanSession {
+        guard settings.vtAutoLookupFlagged, let lookupEngine, session.status != .cancelled, !Task.isCancelled else { return session }
+        var session = session
+        let results = await lookUpFlagged(session.findings, engine: lookupEngine, session: &session, onProgress: onProgress)
+        let (kept, ignored) = ignoreList.filter(results)
+        session.ignoredCount += ignored
+        session.findings = (session.findings + kept).sorted(by: Self.displayOrder)
+        return session
     }
 
     private func finish(_ session: inout ScanSession, status: ScanStatus) -> ScanSession {

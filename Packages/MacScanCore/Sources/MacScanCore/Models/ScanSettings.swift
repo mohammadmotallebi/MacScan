@@ -32,6 +32,10 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     /// If true (and an API key is set), flagged files are looked up on VirusTotal by hash after a scan.
     public var vtAutoLookupFlagged: Bool = false
 
+    /// Run scans as root after asking for an administrator password once per scan, so files owned by
+    /// other users or the system can be read. (Privacy-protected folders still need Full Disk Access.)
+    public var elevatedScans: Bool = false
+
     public init() {}
 
     public var maxFileSizeBytes: Int64 { Int64(max(1, maxFileSizeMB)) * 1024 * 1024 }
@@ -65,6 +69,7 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         yaraRulesFolder = try c.decodeIfPresent(String.self, forKey: .yaraRulesFolder)
         useXProtectRules = try c.decodeIfPresent(Bool.self, forKey: .useXProtectRules) ?? d.useXProtectRules
         vtAutoLookupFlagged = try c.decodeIfPresent(Bool.self, forKey: .vtAutoLookupFlagged) ?? d.vtAutoLookupFlagged
+        elevatedScans = try c.decodeIfPresent(Bool.self, forKey: .elevatedScans) ?? d.elevatedScans
     }
 }
 
