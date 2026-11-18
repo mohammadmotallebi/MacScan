@@ -36,6 +36,7 @@ public enum EngineID: String, Codable, CaseIterable, Sendable, Identifiable {
     case integrity
     case virustotal
     case persistence
+    case processes
     /// Synthetic engine used for "no issues found" rows and scanner-level notes.
     case scanner
 
@@ -48,6 +49,7 @@ public enum EngineID: String, Codable, CaseIterable, Sendable, Identifiable {
         case .integrity: "App Integrity"
         case .virustotal: "VirusTotal"
         case .persistence: "Startup Items"
+        case .processes: "Running Processes"
         case .scanner: "All engines"
         }
     }
@@ -132,11 +134,14 @@ public enum ScanTarget: Codable, Hashable, Sendable {
     case path(URL)
     /// Everything set to start automatically (launch agents/daemons, helpers, shell files, plug-ins, cron).
     case startupItems
+    /// The programs that are running right now.
+    case runningProcesses
 
     public var displayName: String {
         switch self {
         case .applications: "Applications"
         case .startupItems: "Startup Items"
+        case .runningProcesses: "Running Processes"
         case .path(let url): url.path
         }
     }

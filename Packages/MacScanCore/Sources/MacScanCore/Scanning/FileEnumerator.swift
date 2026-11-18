@@ -9,6 +9,12 @@ public struct EnumerationResult: Sendable {
     public var persistenceFindings: [Finding] = []
     /// Units already described by a persistence finding (no generic "No issues found" row).
     public var coveredUnits: Set<String> = []
+    /// Findings from the running-process inventory (engine `.processes`).
+    public var processFindings: [Finding] = []
+    /// Executables of running programs; their signature verdict comes from the process finding.
+    public var processExecutables: Set<String> = []
+    /// Notes for the session (for example how many system processes were not listed).
+    public var notes: [String] = []
 
     public var fileCount: Int { items.lazy.filter { $0.kind == .file }.count }
     public var bundleCount: Int { items.lazy.filter { $0.kind == .appBundle }.count }
@@ -22,6 +28,7 @@ public struct EnumerationResult: Sendable {
 public struct FileEnumerator: Sendable {
     public let settings: ScanSettings
     public let persistenceLocations: PersistenceLocations
+    public let processLister: any ProcessListing
 
     /// Script-like extensions considered "executable content" in Applications scans.
     static let scriptExtensions: Set<String> = [
@@ -29,9 +36,11 @@ public struct FileEnumerator: Sendable {
         "scpt", "applescript", "scptd", "jar", "dylib", "so", "pkg", "dmg", "workflow",
     ]
 
-    public init(settings: ScanSettings, persistenceLocations: PersistenceLocations = .system) {
+    public init(settings: ScanSettings, persistenceLocations: PersistenceLocations = .system,
+                processLister: any ProcessListing = SystemProcessList()) {
         self.settings = settings
         self.persistenceLocations = persistenceLocations
+        self.processLister = processLister
     }
 
     public static var applicationFolders: [URL] {
@@ -61,6 +70,16 @@ public struct FileEnumerator: Sendable {
                 }
                 for path in inventory.programPaths {
                     walker.addProgram(URL(fileURLWithPath: path))
+                }
+            case .runningProcesses:
+                let inventory = try ProcessScanner(lister: processLister).collect()
+                walker.result.processFindings += inventory.findings
+                walker.result.coveredUnits.formUnion(inventory.coveredUnits)
+                walker.result.notes += inventory.notes
+                for path in inventory.programPaths {
+                    let url = URL(fileURLWithPath: path)
+                    walker.result.processExecutables.formUnion([path, Paths.canonical(url).path])
+                    walker.addProgram(url)
                 }
             }
         }

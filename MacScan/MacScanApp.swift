@@ -41,6 +41,9 @@ struct MacScanApp: App {
                 Button("Scan Startup Items") { state.scanStartupItems() }
                     .keyboardShortcut("l", modifiers: [.command, .shift])
                     .disabled(state.isScanning)
+                Button("Scan Running Processes") { state.scanRunningProcesses() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .disabled(state.isScanning)
                 Button("Scan Folders") { state.scanCustomFolders() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(state.isScanning || state.customFolders.isEmpty)

@@ -252,6 +252,7 @@ final class AppState {
             status[.yara] = settings.enableYara ? await YaraEngine(settings: settings).availability() : .disabled
             status[.integrity] = settings.enableIntegrity ? await AppIntegrityEngine().availability() : .disabled
             status[.persistence] = .available(detail: "Launch agents & daemons, helpers, shell files, plug-ins, cron")
+            status[.processes] = .available(detail: "Signature, owner and location of running programs")
             status[.virustotal] = hasKey
                 ? .available(detail: settings.vtAutoLookupFlagged ? "Auto-lookup for flagged files" : "Manual lookups only")
                 : .needsSetup("Optional: add your own API key in Settings")
@@ -271,6 +272,10 @@ final class AppState {
 
     func scanStartupItems() {
         startScan([.startupItems])
+    }
+
+    func scanRunningProcesses() {
+        startScan([.runningProcesses])
     }
 
     func scanCustomFolders() {

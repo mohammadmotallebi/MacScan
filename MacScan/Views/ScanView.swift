@@ -66,6 +66,15 @@ struct ScanControlsPanel: View {
                         .help("Everything set to start automatically: launch agents & daemons, privileged helpers, shell startup files, plug-ins and cron jobs")
 
                         Button {
+                            state.scanRunningProcesses()
+                        } label: {
+                            Label("Scan Running Processes", systemImage: "cpu")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.large)
+                        .help("The programs running right now: who signed them, who runs them and where they run from. Nothing is stopped or changed.")
+
+                        Button {
                             state.scanCustomFolders()
                         } label: {
                             Label("Scan Folders", systemImage: "folder.badge.gearshape")
@@ -157,6 +166,7 @@ struct ScanControlsPanel: View {
                         EngineStatusRow(engine: .yara)
                         EngineStatusRow(engine: .integrity)
                         EngineStatusRow(engine: .persistence)
+                        EngineStatusRow(engine: .processes)
                         EngineStatusRow(engine: .virustotal)
                     }
                     .padding(4)

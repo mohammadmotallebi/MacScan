@@ -138,6 +138,11 @@ public struct AppIntegrityEngine: ScanEngine {
         // Signer identity.
         let signing = CodeSigning.status(of: url)
         notes.append(signing.description)
+        if case .adhoc = signing, PersistenceScanner.isPackageManagerPath(path) {
+            // Homebrew/MacPorts build locally and ad-hoc sign by design; Gatekeeper never sees these.
+            notes.append("Homebrew/MacPorts build: package-manager builds are ad-hoc signed by design, so Gatekeeper and strict verification don't apply.")
+            return [Finding(path: path, severity: .clean, engine: .integrity, reason: "Package-manager build (ad-hoc signed by design)", detail: notes.joined(separator: "\n"), unitPath: path)]
+        }
         switch signing {
         case .unsigned:
             problems.append((.warning, "App is not code signed", "Unsigned apps cannot be verified and are blocked by Gatekeeper by default."))

@@ -26,6 +26,14 @@ public enum SigningStatus: Equatable, Sendable {
         }
     }
 
+    /// The signing identifier (usually the bundle ID), if the code is signed at all.
+    public var identifier: String? {
+        switch self {
+        case .adhoc(let id), .selfSigned(let id, _), .signed(let id, _, _): id
+        case .unsigned, .unreadable: nil
+        }
+    }
+
     public var teamID: String? {
         if case .signed(_, let team, _) = self { return team }
         return nil

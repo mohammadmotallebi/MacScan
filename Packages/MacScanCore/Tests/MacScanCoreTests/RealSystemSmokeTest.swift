@@ -53,3 +53,24 @@ func realUninstallProbe() throws {
         }
     }
 }
+
+// Opt-in, read-only: scan the programs running right now (no ClamAV):
+//   MACSCAN_PROCESS_PROBE=/tmp/macscan-processes.txt swift test --filter realProcessProbe
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_PROCESS_PROBE"] != nil))
+func realProcessProbe() async throws {
+    var settings = ScanSettings()
+    settings.enableClamAV = false
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+    var start = ContinuousClock.now
+    let inventory = try ProcessScanner().collect()
+    var out = "inventory: \(ContinuousClock.now - start), \(inventory.findings.count) programs\n"
+    start = ContinuousClock.now
+    let session = await ScanCoordinator(engines: EngineFactory.makeEngines(settings: settings), settings: settings, logger: logger)
+        .run(targets: [.runningProcesses]) { _ in }
+    out += "scan: \(ContinuousClock.now - start) engines: \(session.enginesUsed.map(\.title))\n"
+    out += "threat: \(session.count(.threat)) warning: \(session.count(.warning)) clean: \(session.count(.clean)) items: \(session.itemsTotal)\nnotes: \(session.notes)\n"
+    for f in session.findings where f.severity > .clean { out += "\(f.severity) | \(f.engine.title) | \(f.reason) | \(f.path)\n" }
+    out += "--- clean running programs:\n"
+    for f in session.findings where f.severity == .clean && f.engine == .processes { out += "\(f.reason) | \(f.path)\n" }
+    try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_PROCESS_PROBE"]!, atomically: true, encoding: .utf8)
+}

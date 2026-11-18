@@ -6,6 +6,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **YARA** rules (via Homebrew's `yara`): a small sample macOS ruleset, your own rules, and **Apple's XProtect rules** that ship with macOS
 - **App integrity**: `codesign --verify --deep --strict`, Gatekeeper/notarization (`spctl`), unsigned/ad-hoc executables, quarantine info
 - **Signer checks**: flags **self-signed** apps and binaries (certificates Apple didn't issue, typical of cracked or repackaged software) and apps that **impersonate** a well-known publisher's bundle ID
+- **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
 - Results with severity filter, Reveal in Finder, Move to Trash (always asks first), Ignore
@@ -171,6 +172,27 @@ Nothing is disabled or deleted. Use **Reveal in Finder** and remove items yourse
 Login items you manage in System Settings › General › Login Items, and configuration profiles, need admin
 rights to list. Review them in System Settings.
 
+### Running Processes scan
+
+**Scan Running Processes** (⇧⌘P) looks at every process that is running right now and lists one row per
+program (a browser's twenty helper processes are one row), with its process IDs, user, parent and signature.
+
+Programs are flagged when they:
+- run as root without a trusted signature (**Threat**), or with an ad-hoc one
+- are self-signed (**Threat**) or not signed at all
+- have no Apple-issued signature and run from `/tmp`, `/Users/Shared`, Downloads or a hidden folder
+- were started from a file that has since been deleted (an app updated while running is recognised and
+  shown as Clean)
+- impersonate a known publisher
+
+Each program file also goes through ClamAV, YARA and the integrity checks, like any scanned file. Apple
+system software on the sealed system volume is counted in the scan notes but not listed. Signed programs
+aren't flagged for their location, because macOS itself runs signed apps from temporary folders (App
+Translocation, code-sign clones, iPhone app wrappers).
+
+Nothing is stopped, suspended or changed. Quit a program yourself in Activity Monitor if you don't trust it.
+This is a snapshot of the moment you scan, not live monitoring.
+
 ### Uninstall
 
 **Uninstall** in the sidebar (⇧⌘U), or **Uninstall App…** on any scan result inside an app:
@@ -278,7 +300,7 @@ Config/MacScan.entitlements   App Sandbox explicitly OFF
 Packages/MacScanCore/         All scanning logic (Swift package, testable with `swift test`)
   Sources/MacScanCore/
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
-    Scanning/                 FileEnumerator, Persistence (startup items), Mach-O detection, ScanCoordinator
+    Scanning/                 FileEnumerator, Persistence (startup items), RunningProcesses, Mach-O detection, ScanCoordinator
     Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing
     Persistence/              History, ignore list, folder bookmarks, Full Disk Access helpers

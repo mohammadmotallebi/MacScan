@@ -52,6 +52,7 @@ public struct ScanCoordinator: Sendable {
     let ignoreList: IgnoreList
     let logger: FileLogger
     let persistenceLocations: PersistenceLocations
+    let processLister: any ProcessListing
 
     public init(
         engines: [any ScanEngine],
@@ -59,8 +60,10 @@ public struct ScanCoordinator: Sendable {
         settings: ScanSettings,
         ignoreList: IgnoreList = IgnoreList(),
         logger: FileLogger = .shared,
-        persistenceLocations: PersistenceLocations = .system
+        persistenceLocations: PersistenceLocations = .system,
+        processLister: any ProcessListing = SystemProcessList()
     ) {
+        self.processLister = processLister
         self.persistenceLocations = persistenceLocations
         self.engines = engines
         self.lookupEngine = lookupEngine
@@ -78,12 +81,13 @@ public struct ScanCoordinator: Sendable {
         // 1. Enumerate.
         let enumeration: EnumerationResult
         do {
-            enumeration = try FileEnumerator(settings: settings, persistenceLocations: persistenceLocations).enumerate(targets)
+            enumeration = try FileEnumerator(settings: settings, persistenceLocations: persistenceLocations, processLister: processLister).enumerate(targets)
         } catch {
             return finish(&session, status: .cancelled)
         }
         session.issues = enumeration.issues
         session.skippedCount = enumeration.skippedCount
+        session.notes += enumeration.notes
         session.itemsTotal = enumeration.items.count
         for issue in enumeration.issues.prefix(50) {
             logger.warning("Cannot read \(issue.path): \(issue.message)")
@@ -145,7 +149,13 @@ public struct ScanCoordinator: Sendable {
         onProgress(ScanProgress(phase: .finishing, itemsDone: session.itemsScanned, itemsTotal: session.itemsTotal))
 
         // 4. Post-process.
-        var findings = enumeration.persistenceFindings + (await tracker.findings)
+        // A running program's signature verdict is in its process finding; drop the integrity engine's
+        // duplicate for the same executable.
+        let engineFindings = await tracker.findings.filter {
+            !($0.engine == .integrity && enumeration.processExecutables.contains($0.path))
+        }
+        var findings = enumeration.persistenceFindings + enumeration.processFindings + engineFindings
+        if targets.contains(.runningProcesses) { session.enginesUsed.append(.processes) }
         if targets.contains(.startupItems) {
             session.enginesUsed.append(.persistence)
             session.notes.append("Login items managed in System Settings › General › Login Items, and configuration profiles in System Settings › Privacy & Security › Profiles, need admin rights to list — review those there.")

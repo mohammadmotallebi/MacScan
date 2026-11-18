@@ -100,7 +100,7 @@ public struct PersistenceScanner: Sendable {
     static let shellFiles = [".zshrc", ".zprofile", ".zshenv", ".zlogin", ".zlogout", ".bash_profile", ".bashrc", ".profile"]
     static let interpreters: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "csh", "tcsh", "python", "python3", "perl", "ruby", "osascript", "node", "env"]
     /// Hidden folders that are common, legitimate tool homes.
-    static let benignHiddenFolders: Set<String> = [".local", ".cargo", ".nvm", ".orbstack", ".docker", ".volta", ".bun", ".deno", ".rbenv", ".pyenv", ".sdkman"]
+    static let benignHiddenFolders: Set<String> = [".local", ".cargo", ".rustup", ".nvm", ".npm", ".orbstack", ".docker", ".volta", ".bun", ".deno", ".rbenv", ".pyenv", ".sdkman", ".vscode", ".cursor"]
     /// Package managers build locally and ad-hoc sign by design.
     public static let packageManagerPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/opt/", "/opt/local/"]
     static let packageManagerLabels = ["homebrew.mxcl.", "org.macports."]
