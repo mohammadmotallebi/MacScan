@@ -105,6 +105,9 @@ public struct PersistenceScanner: Sendable {
     public static let packageManagerPrefixes = ["/opt/homebrew/", "/usr/local/Cellar/", "/usr/local/opt/", "/opt/local/"]
     static let packageManagerLabels = ["homebrew.mxcl.", "org.macports."]
 
+    /// Reason used for launch items whose program no longer exists (these can be removed from the results).
+    public static let missingProgramReason = "Startup item points to a missing program"
+
     public static func isPackageManagerPath(_ path: String) -> Bool {
         packageManagerPrefixes.contains { path.hasPrefix($0) }
     }
@@ -315,7 +318,7 @@ public struct PersistenceScanner: Sendable {
 
         if let program = entry.program {
             if !FileManager.default.fileExists(atPath: program) {
-                problems.append((.warning, "Startup item points to a missing program"))
+                problems.append((.warning, Self.missingProgramReason))
                 notes.append("The program no longer exists — usually left over from an uninstalled app.")
             } else {
                 if Self.isUnusualLocation(program) {

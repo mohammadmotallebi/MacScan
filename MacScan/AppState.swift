@@ -51,6 +51,13 @@ struct PendingTrash: Identifiable {
     let sessionID: UUID
 }
 
+/// A launch item whose program is gone, waiting for the user's confirmation before it's removed.
+struct PendingOrphanRemoval: Identifiable {
+    let id = UUID()
+    let finding: Finding
+    let item: OrphanedLaunchItem
+}
+
 struct FreshclamRun {
     var lines: [String] = []
     var running = true
@@ -95,6 +102,9 @@ final class AppState {
     var installHelp: EngineID?
     var alert: AppAlert?
     var pendingTrash: PendingTrash?
+    var pendingOrphanRemoval: PendingOrphanRemoval?
+    /// Plists of orphaned launch items being removed right now.
+    var orphanRemovalsInFlight: Set<String> = []
     var freshclam: FreshclamRun?
     var showFreshclam = false
 
@@ -319,6 +329,47 @@ final class AppState {
                 message += "\n\nThe item may be owned by another user or protected by macOS. You can move it to the Trash yourself in Finder."
             }
             alert = AppAlert(title: "Could not move to Trash", message: message)
+        }
+    }
+
+    /// True for Startup Items results whose program no longer exists (offered "Remove Orphaned Startup Item…").
+    func isOrphanedLaunchItem(_ finding: Finding) -> Bool {
+        finding.engine == .persistence && finding.reason == PersistenceScanner.missingProgramReason
+            && finding.path.hasSuffix(".plist") && !trashedPaths.contains(finding.path)
+    }
+
+    func requestOrphanRemoval(_ finding: Finding) {
+        guard let item = OrphanedLaunchItem.inspect(finding.path) else {
+            alert = AppAlert(title: "Not removed",
+                             message: OrphanedLaunchItemError.noLongerOrphaned(finding.fileName).errorDescription ?? "")
+            return
+        }
+        pendingOrphanRemoval = PendingOrphanRemoval(finding: finding, item: item)
+    }
+
+    /// Called only after the user confirms. Stops the job and moves its plist to the Trash.
+    func confirmOrphanRemoval(_ pending: PendingOrphanRemoval) {
+        let path = pending.item.plist.path
+        orphanRemovalsInFlight.insert(path)
+        Task {
+            defer { self.orphanRemovalsInFlight.remove(path) }
+            do {
+                let report = try await pending.item.remove()
+                if report.removedCount > 0 {
+                    trashedPaths.insert(path)
+                    logger.info("User removed orphaned startup item \(pending.item.displayName): \(path)")
+                } else if let failure = report.failures.first {
+                    let why: String = switch failure.outcome {
+                    case .skipped(let reason): reason
+                    case .failed(let reason): reason
+                    case .blockedByMacOS: UninstallReport.blockedExplanation
+                    default: "Unknown reason"
+                    }
+                    alert = AppAlert(title: "Could not remove \(pending.item.displayName)", message: why)
+                }
+            } catch {
+                alert = AppAlert(title: "Could not remove \(pending.item.displayName)", message: error.localizedDescription)
+            }
         }
     }
 

@@ -127,6 +127,10 @@ struct FindingActions: View {
         if let app = state.owningApp(of: finding) {
             Button("Uninstall “\(app.deletingPathExtension().lastPathComponent)” Completely…") { state.openUninstaller(for: app) }
         }
+        if state.isOrphanedLaunchItem(finding) {
+            Button("Remove Orphaned Startup Item…", role: .destructive) { state.requestOrphanRemoval(finding) }
+                .disabled(state.orphanRemovalsInFlight.contains(finding.path))
+        }
         Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
             .disabled(state.trashedPaths.contains(finding.path))
     }
@@ -175,8 +179,14 @@ struct FindingDetailView: View {
                     Button("Uninstall App…") { state.openUninstaller(for: app) }
                         .help("Remove \(app.lastPathComponent) and everything that belongs to it")
                 }
-                Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
-                    .disabled(state.trashedPaths.contains(finding.path))
+                if state.isOrphanedLaunchItem(finding) {
+                    Button("Remove Startup Item…", role: .destructive) { state.requestOrphanRemoval(finding) }
+                        .disabled(state.orphanRemovalsInFlight.contains(finding.path))
+                        .help("Stops this leftover startup item and moves it to the Trash. Its program no longer exists.")
+                } else {
+                    Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
+                        .disabled(state.trashedPaths.contains(finding.path))
+                }
             }
             .controlSize(.small)
         }

@@ -591,3 +591,72 @@ final class RecordingAdminRunner: AdminRunner, @unchecked Sendable {
         #expect(!LeftoverFinder.isProtectedAppData("/Library/Containers/com.a.b", home: home))
     }
 }
+
+/// Launch items whose program is gone: detection and removal from the Startup Items results.
+@Suite(.serialized) struct OrphanedLaunchItemTests {
+    func agent(_ home: TempDir, _ name: String, program: String, label: String? = nil) throws -> URL {
+        var plist: [String: Any] = ["ProgramArguments": [program, "--flag"]]
+        plist["Label"] = label ?? name
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        return try home.write("Library/LaunchAgents/\(name).plist", data)
+    }
+
+    @Test func detectsOnlyRealOrphans() throws {
+        let home = try TempDir()
+        let root = try TempDir()
+        let locations = PersistenceLocations(home: home.url, root: root.url, includeCrontab: false)
+        let orphan = try agent(home, "com.gone.cleaner", program: "/Applications/Gone.app/Contents/MacOS/cleaner")
+        let item = try #require(OrphanedLaunchItem.inspect(orphan.path, locations: locations))
+        #expect(item.label == "com.gone.cleaner")
+        #expect(item.missingProgram == "/Applications/Gone.app/Contents/MacOS/cleaner")
+        #expect(item.domain == .gui)
+        #expect(!item.requiresAdmin)
+
+        let alive = try agent(home, "com.alive.agent", program: "/usr/bin/true")
+        let external = try agent(home, "com.external.agent", program: "/Volumes/Backup/tool")
+        let apple = try agent(home, "com.apple.something", program: "/nonexistent/tool")
+        let relative = try agent(home, "com.relative.agent", program: "tool")
+        let elsewhere = try home.write("Library/Other/com.gone.cleaner.plist", try Data(contentsOf: orphan))
+        for path in [alive, external, apple, relative, elsewhere] {
+            #expect(OrphanedLaunchItem.inspect(path.path, locations: locations) == nil, "\(path.lastPathComponent)")
+        }
+        // The scan uses the same wording the results view keys on.
+        let finding = PersistenceScanner(locations: locations).analyze(PersistenceEntry(kind: .userLaunchAgent, source: orphan.path, label: "com.gone.cleaner", program: item.missingProgram))
+        #expect(finding.reason == PersistenceScanner.missingProgramReason)
+    }
+
+    @Test func removesTheOrphanToTheTrash() async throws {
+        let home = try TempDir()
+        let locations = PersistenceLocations(home: home.url, root: try TempDir().url, includeCrontab: false)
+        let orphan = try agent(home, "com.gone.cleaner", program: "/nonexistent/cleaner")
+        let item = try #require(OrphanedLaunchItem.inspect(orphan.path, locations: locations))
+        let trash = home.url.appendingPathComponent(".Trash")
+        let fakeTrash = home.url.appendingPathComponent("FakeTrash")
+        let admin = RecordingAdminRunner()
+        let report = try await item.remove(with: Uninstaller(trasher: FolderTrasher(folder: fakeTrash), admin: admin,
+                                                             logger: FileLogger(directory: home.url.appendingPathComponent("logs")),
+                                                             trashDirectory: trash, manageProcesses: false),
+                                           locations: locations)
+        #expect(report.movedCount == 1)
+        #expect(report.failures.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: orphan.path))
+        #expect(admin.scripts.isEmpty, "a user agent needs no password")
+    }
+
+    @Test func refusesWhenTheProgramCameBack() async throws {
+        let home = try TempDir()
+        let locations = PersistenceLocations(home: home.url, root: try TempDir().url, includeCrontab: false)
+        let program = home.url.appendingPathComponent("bin/tool")
+        let plist = try agent(home, "com.back.agent", program: program.path)
+        let item = try #require(OrphanedLaunchItem.inspect(plist.path, locations: locations))
+        _ = try home.copy("/usr/bin/true", to: "bin/tool")   // reinstalled since the scan
+        await #expect(throws: OrphanedLaunchItemError.noLongerOrphaned("com.back.agent")) {
+            _ = try await item.remove(with: Uninstaller(trasher: FolderTrasher(folder: home.url.appendingPathComponent("FakeTrash")),
+                                                        admin: RecordingAdminRunner(),
+                                                        logger: FileLogger(directory: home.url.appendingPathComponent("logs")),
+                                                        trashDirectory: home.url.appendingPathComponent(".Trash"), manageProcesses: false),
+                                      locations: locations)
+        }
+        #expect(FileManager.default.fileExists(atPath: plist.path))
+    }
+}

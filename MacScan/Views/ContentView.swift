@@ -71,6 +71,18 @@ struct ContentView: View {
         } message: { pending in
             Text("\(pending.finding.path)\n\nThe item goes to the Trash, where you can restore it. MacScan never deletes anything permanently.")
         }
+        .confirmationDialog(
+            "Remove orphaned startup item?",
+            isPresented: Binding(get: { state.pendingOrphanRemoval != nil }, set: { if !$0 { state.pendingOrphanRemoval = nil } }),
+            presenting: state.pendingOrphanRemoval
+        ) { pending in
+            Button("Stop and Move to Trash", role: .destructive) {
+                state.confirmOrphanRemoval(pending)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text("\(pending.item.displayName) starts a program that no longer exists:\n\(pending.item.missingProgram)\n\nMacScan stops it and moves \(pending.item.plist.lastPathComponent) to the Trash, where you can restore it.\(pending.item.requiresAdmin ? " macOS will ask for your administrator password." : "")")
+        }
         .alert(
             state.alert?.title ?? "",
             isPresented: Binding(get: { state.alert != nil }, set: { if !$0 { state.alert = nil } }),
