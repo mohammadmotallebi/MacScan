@@ -10,6 +10,7 @@ enum AppSection: Hashable {
     case uninstall
     case diskUsage
     case security
+    case quarantine
 }
 
 enum SeverityFilter: String, CaseIterable, Identifiable {
@@ -51,6 +52,12 @@ struct PendingTrash: Identifiable {
     let id = UUID()
     let finding: Finding
     let sessionID: UUID
+}
+
+/// A quarantined item waiting for the user's confirmation before it's deleted for good (nil item = all).
+struct PendingQuarantineDelete: Identifiable {
+    let id = UUID()
+    let items: [QuarantinedItem]
 }
 
 /// A launch item whose program is gone, waiting for the user's confirmation before it's removed.
@@ -107,6 +114,11 @@ final class AppState {
     var installHelp: EngineID?
     var alert: AppAlert?
     var pendingTrash: PendingTrash?
+    var pendingQuarantine: PendingTrash?
+    var pendingQuarantineDelete: PendingQuarantineDelete?
+    /// Everything in MacScan's quarantine, newest first.
+    var quarantined: [QuarantinedItem] = []
+    @ObservationIgnored let quarantineStore = QuarantineStore()
     var pendingOrphanRemoval: PendingOrphanRemoval?
     /// Plists of orphaned launch items being removed right now.
     var orphanRemovalsInFlight: Set<String> = []
@@ -135,6 +147,7 @@ final class AppState {
         customFolders = TargetStore().load()
         ignoreList = IgnoreList.load()
         history = historyStore.loadAll()
+        quarantined = quarantineStore.list()
         currentSession = nil
         hasVirusTotalKey = KeychainStore.virusTotal.read() != nil
         logger.info("MacScan launched")
@@ -459,6 +472,62 @@ final class AppState {
                 message += "\n\nThe item may be owned by another user or protected by macOS. You can move it to the Trash yourself in Finder."
             }
             alert = AppAlert(title: "Could not move to Trash", message: message)
+        }
+    }
+
+    // MARK: - Quarantine (never automatic)
+
+    func isQuarantined(_ path: String) -> Bool {
+        quarantined.contains { $0.originalPath == path }
+    }
+
+    /// The item is no longer at its path because the user moved it to the Trash or to quarantine.
+    func isRemoved(_ path: String) -> Bool {
+        trashedPaths.contains(path) || isQuarantined(path)
+    }
+
+    func requestQuarantine(_ finding: Finding, sessionID: UUID) {
+        pendingQuarantine = PendingTrash(finding: finding, sessionID: sessionID)
+    }
+
+    /// Called only after the user confirms in the dialog.
+    func confirmQuarantine(_ pending: PendingTrash) {
+        let finding = pending.finding
+        do {
+            let item = try quarantineStore.quarantine(path: finding.path, reason: finding.reason, engine: finding.engine, sha256: finding.sha256)
+            quarantined.insert(item, at: 0)
+            logger.info("User quarantined: \(finding.path)")
+        } catch {
+            logger.error("Quarantine failed for \(finding.path): \(error.localizedDescription)")
+            alert = AppAlert(title: "Could not quarantine", message: error.localizedDescription)
+        }
+    }
+
+    func restoreQuarantined(_ item: QuarantinedItem) {
+        do {
+            try quarantineStore.restore(item)
+            quarantined.removeAll { $0.id == item.id }
+            logger.info("User restored from quarantine: \(item.originalPath)")
+        } catch {
+            logger.error("Restore failed for \(item.originalPath): \(error.localizedDescription)")
+            alert = AppAlert(title: "Could not restore", message: error.localizedDescription)
+        }
+    }
+
+    /// Called only after the user confirms. Deletes for good.
+    func confirmQuarantineDelete(_ pending: PendingQuarantineDelete) {
+        var failures: [String] = []
+        for item in pending.items {
+            do {
+                try quarantineStore.delete(item)
+                quarantined.removeAll { $0.id == item.id }
+                logger.info("User deleted from quarantine: \(item.originalPath)")
+            } catch {
+                failures.append("\(item.name): \(error.localizedDescription)")
+            }
+        }
+        if !failures.isEmpty {
+            alert = AppAlert(title: "Could not delete", message: failures.joined(separator: "\n"))
         }
     }
 

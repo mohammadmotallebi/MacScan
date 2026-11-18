@@ -22,6 +22,9 @@ struct ContentView: View {
                     .tag(AppSection.diskUsage)
                 Label("Security", systemImage: "lock.shield")
                     .tag(AppSection.security)
+                Label("Quarantine", systemImage: "archivebox")
+                    .badge(state.quarantined.count)
+                    .tag(AppSection.quarantine)
             }
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
             .onChange(of: state.selectedSection) { _, newValue in
@@ -38,6 +41,7 @@ struct ContentView: View {
                 case .uninstall: UninstallView()
                 case .diskUsage: DiskUsageView()
                 case .security: SecurityView()
+                case .quarantine: QuarantineView()
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
@@ -56,7 +60,7 @@ struct ContentView: View {
                     return true
                 }
                 // The Security section has nothing to drop onto.
-                if state.selectedSection == .security { return false }
+                if state.selectedSection == .security || state.selectedSection == .quarantine { return false }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true
@@ -89,6 +93,32 @@ struct ContentView: View {
             Button("Cancel", role: .cancel) {}
         } message: { pending in
             Text("\(pending.finding.path)\n\nThe item goes to the Trash, where you can restore it. MacScan never deletes anything permanently.")
+        }
+        .confirmationDialog(
+            "Move to quarantine?",
+            isPresented: Binding(get: { state.pendingQuarantine != nil }, set: { if !$0 { state.pendingQuarantine = nil } }),
+            presenting: state.pendingQuarantine
+        ) { pending in
+            Button("Quarantine “\(pending.finding.fileName)”") {
+                state.confirmQuarantine(pending)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text("\(pending.finding.path)\n\nThe item is moved into MacScan's quarantine and locked, so it can't run or be opened. You can put it back exactly where it was from the Quarantine section.")
+        }
+        .confirmationDialog(
+            "Delete permanently?",
+            isPresented: Binding(get: { state.pendingQuarantineDelete != nil }, set: { if !$0 { state.pendingQuarantineDelete = nil } }),
+            presenting: state.pendingQuarantineDelete
+        ) { pending in
+            Button(pending.items.count == 1 ? "Delete “\(pending.items[0].name)” Permanently" : "Delete \(pending.items.count) Items Permanently", role: .destructive) {
+                state.confirmQuarantineDelete(pending)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            Text(pending.items.count == 1
+                 ? "\(pending.items[0].originalPath)\n\nThis can't be undone: the item does not go to the Trash."
+                 : "Everything in quarantine is deleted. This can't be undone: the items do not go to the Trash.")
         }
         .confirmationDialog(
             "Remove orphaned startup item?",

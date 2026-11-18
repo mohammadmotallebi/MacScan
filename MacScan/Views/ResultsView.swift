@@ -58,12 +58,13 @@ struct ResultsView: View {
                 .width(min: 80, ideal: 90, max: 110)
 
                 TableColumn("Path", value: \.path) { f in
-                    let trashed = state.trashedPaths.contains(f.path)
+                    let quarantined = state.isQuarantined(f.path)
+                    let trashed = state.trashedPaths.contains(f.path) || quarantined
                     VStack(alignment: .leading, spacing: 1) {
                         Text(f.fileName)
                             .strikethrough(trashed)
                             .lineLimit(1)
-                        Text(trashed ? "Moved to Trash" : (f.path as NSString).deletingLastPathComponent)
+                        Text(quarantined ? "Moved to Quarantine" : trashed ? "Moved to Trash" : (f.path as NSString).deletingLastPathComponent)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -142,8 +143,10 @@ struct FindingActions: View {
             Button("Remove Orphaned Startup Item…", role: .destructive) { state.requestOrphanRemoval(finding) }
                 .disabled(state.orphanRemovalsInFlight.contains(finding.path))
         }
+        Button("Quarantine…") { state.requestQuarantine(finding, sessionID: sessionID) }
+            .disabled(state.isRemoved(finding.path))
         Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
-            .disabled(state.trashedPaths.contains(finding.path))
+            .disabled(state.isRemoved(finding.path))
     }
 }
 
@@ -196,8 +199,11 @@ struct FindingDetailView: View {
                         .disabled(state.orphanRemovalsInFlight.contains(finding.path))
                         .help("Stops this leftover startup item and moves it to the Trash. Its program no longer exists.")
                 } else {
+                    Button("Quarantine…") { state.requestQuarantine(finding, sessionID: sessionID) }
+                        .disabled(state.isRemoved(finding.path))
+                        .help("Moves the item into MacScan's locked quarantine. You can restore it later.")
                     Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
-                        .disabled(state.trashedPaths.contains(finding.path))
+                        .disabled(state.isRemoved(finding.path))
                 }
             }
             .controlSize(.small)

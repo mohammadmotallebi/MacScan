@@ -27,6 +27,16 @@ public enum AppPaths {
         ensure(applicationSupport.appendingPathComponent("History", isDirectory: true))
     }
 
+    /// Items the user moved to quarantine (see `QuarantineStore`).
+    public static var quarantine: URL {
+        ensure(URL(fileURLWithPath: quarantinePath, isDirectory: true))
+    }
+
+    /// The quarantine folder's path, without creating it.
+    public static var quarantinePath: String {
+        home.appendingPathComponent("Library/Application Support/MacScan/Quarantine").path
+    }
+
     /// MacScan's own ClamAV database directory (filled by "Update virus database").
     public static var clamDatabase: URL {
         ensure(applicationSupport.appendingPathComponent("ClamAV", isDirectory: true))

@@ -9,6 +9,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
 - **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
 - **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on
+- **Quarantine**: move a flagged item into a locked folder instead of the Trash, and restore it exactly where it was
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
 - Results with severity filter, Reveal in Finder, Move to Trash (always asks first), Ignore
@@ -248,6 +249,21 @@ MacScan only reads these settings with the system's own status tools and never c
 takes you to the right pane. It needs no administrator password. A setting that can't be read is shown as
 unknown, never as a pass.
 
+### Quarantine
+
+Every scan result has **Quarantine…** next to **Move to Trash…**. After you confirm, the item is moved into
+MacScan's quarantine folder and locked (all permissions removed), so it can't run, be opened or be indexed.
+
+The **Quarantine** section in the sidebar lists what is there, with where it came from, why it was flagged
+and its SHA-256. From there you can:
+- **Restore** an item to exactly where it was, with its original permissions. Restore refuses to overwrite
+  something that has since appeared at that path.
+- **Delete Permanently…** one item, or **Delete All…**. This asks first and can't be undone.
+
+MacScan never quarantines, restores or deletes anything by itself. System locations can't be quarantined, and
+items owned by another user or protected by macOS are refused with an explanation. Scans skip the quarantine
+folder.
+
 ### Uninstall
 
 **Uninstall** in the sidebar (⇧⌘U), or **Uninstall App…** on any scan result inside an app:
@@ -328,6 +344,7 @@ or turn on auto-lookup for flagged files only.
 | Scan history (JSON, last 100 scans) | `~/Library/Application Support/MacScan/History/` |
 | Ignore list | `~/Library/Application Support/MacScan/ignored.json` |
 | Downloads already seen (only with "Scan new downloads") | `~/Library/Application Support/MacScan/downloads-seen.json` |
+| Quarantined items | `~/Library/Application Support/MacScan/Quarantine/` |
 | Startup items of the last scan (to report changes) | `~/Library/Application Support/MacScan/startup-baseline.json` |
 | Browser extensions of the last scan (to report changes) | `~/Library/Application Support/MacScan/extensions-baseline.json` |
 | Launch agents (only while background scans are on) | `~/Library/LaunchAgents/com.local.MacScan.*.plist` |

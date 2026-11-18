@@ -128,7 +128,8 @@ public struct FileEnumerator: Sendable {
 
         init(settings: ScanSettings) {
             self.settings = settings
-            self.excluder = PathExcluder(settings.excludedPaths)
+            // Quarantined items are locked and already dealt with: never scan them or report them as unreadable.
+            self.excluder = PathExcluder(settings.excludedPaths + [AppPaths.quarantinePath])
         }
 
         /// `unit` makes every file below `root` belong to that one result unit (as files in an app do).
