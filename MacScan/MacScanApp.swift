@@ -65,6 +65,12 @@ struct MacScanApp: App {
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 .disabled(state.diskUsage.isScanning)
+                Button("Check Security Settings") {
+                    state.selectedSection = .security
+                    state.security.refresh()
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .disabled(state.security.isChecking)
                 Divider()
                 Button("Cancel Scan") { state.cancelScan() }
                     .keyboardShortcut(".", modifiers: [.command])

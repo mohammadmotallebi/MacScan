@@ -8,6 +8,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **Signer checks**: flags **self-signed** apps and binaries (certificates Apple didn't issue, typical of cracked or repackaged software) and apps that **impersonate** a well-known publisher's bundle ID
 - **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
 - **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
+- **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
 - Results with severity filter, Reveal in Finder, Move to Trash (always asks first), Ignore
@@ -225,6 +226,28 @@ Nothing is disabled or removed; do that in the browser's own extension settings.
 what an extension may ask for, not which websites you allowed. Browsers built into the system (components) and
 Firefox themes are not listed.
 
+### Security check
+
+**Security** in the sidebar (⇧⌘K) shows whether the protections built into macOS are on. Each row is a pass,
+a warning or a fail, with one line on what it means and how to fix it:
+
+| Check | Not passing when |
+| --- | --- |
+| System Integrity Protection | off (**Fail**) or a custom configuration |
+| Gatekeeper | off (**Fail**) |
+| FileVault disk encryption | off |
+| Firewall | off |
+| XProtect malware definitions | not updated for more than 60 days |
+| macOS updates | updates are waiting (as of macOS's last check; MacScan doesn't go online for this) |
+| Automatic security updates | checking, or installing Security Responses and system files, is turned off |
+| Password after sleep or screen saver | off, or a delay over 15 minutes |
+| Automatic login, Guest account | on |
+| Remote Login (SSH), Screen Sharing, File Sharing | on |
+
+MacScan only reads these settings with the system's own status tools and never changes one; **Open Settings**
+takes you to the right pane. It needs no administrator password. A setting that can't be read is shown as
+unknown, never as a pass.
+
 ### Uninstall
 
 **Uninstall** in the sidebar (⇧⌘U), or **Uninstall App…** on any scan result inside an app:
@@ -334,6 +357,7 @@ Config/MacScan.entitlements   App Sandbox explicitly OFF
 Packages/MacScanCore/         All scanning logic (Swift package, testable with `swift test`)
   Sources/MacScanCore/
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
+    Security/                 SecurityPosture (status of macOS's own protections)
     Scanning/                 FileEnumerator, Persistence (startup items), StartupChanges, RunningProcesses, BrowserExtensions, Mach-O detection, ScanCoordinator
     Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing

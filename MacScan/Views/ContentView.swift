@@ -20,6 +20,8 @@ struct ContentView: View {
                     .tag(AppSection.uninstall)
                 Label("Disk Usage", systemImage: "chart.bar.doc.horizontal")
                     .tag(AppSection.diskUsage)
+                Label("Security", systemImage: "lock.shield")
+                    .tag(AppSection.security)
             }
             .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
             .onChange(of: state.selectedSection) { _, newValue in
@@ -35,6 +37,7 @@ struct ContentView: View {
                 case .history: HistoryView()
                 case .uninstall: UninstallView()
                 case .diskUsage: DiskUsageView()
+                case .security: SecurityView()
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
@@ -52,6 +55,8 @@ struct ContentView: View {
                     state.diskUsage.scan(folder)
                     return true
                 }
+                // The Security section has nothing to drop onto.
+                if state.selectedSection == .security { return false }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true

@@ -9,6 +9,7 @@ enum AppSection: Hashable {
     case history
     case uninstall
     case diskUsage
+    case security
 }
 
 enum SeverityFilter: String, CaseIterable, Identifiable {
@@ -88,6 +89,7 @@ final class AppState {
     var history: [ScanSession] = []
     let uninstall = UninstallModel()
     let diskUsage = DiskUsageModel()
+    let security = SecurityModel()
 
     // MARK: UI state
 
