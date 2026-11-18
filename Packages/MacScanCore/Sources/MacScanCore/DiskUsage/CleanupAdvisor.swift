@@ -38,6 +38,58 @@ public struct CleanupSuggestion: Identifiable, Sendable, Equatable {
     /// What it is and what happens if it's deleted.
     public let explanation: String
     public let action: CleanupAction
+    /// Suggestions of the same kind that appear many times (e.g. every project's node_modules) share a group
+    /// and are shown as one row.
+    public var group: String? = nil
+}
+
+/// A row in the cleanup list: one suggestion, or several of the same kind shown together.
+public enum CleanupEntry: Identifiable, Sendable, Equatable {
+    case single(CleanupSuggestion)
+    case group(title: String, members: [CleanupSuggestion])
+
+    public var id: String {
+        switch self {
+        case .single(let s): s.id
+        case .group(let title, _): "group:" + title
+        }
+    }
+
+    public var members: [CleanupSuggestion] {
+        switch self {
+        case .single(let s): [s]
+        case .group(_, let members): members
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .single(let s): s.title
+        case .group(let title, _): title
+        }
+    }
+
+    public var priority: CleanupPriority { members.map(\.priority).min() ?? .review }
+    public var size: Int64 { members.reduce(0) { $0 + $1.item.size } }
+
+    /// Groups suggestions that share a `group` (2 or more members) into one entry, biggest first, keeping the
+    /// priority order ("Safe to clean" before "Review first").
+    public static func entries(for suggestions: [CleanupSuggestion]) -> [CleanupEntry] {
+        var byGroup: [String: [CleanupSuggestion]] = [:]
+        for s in suggestions { if let g = s.group { byGroup[g, default: []].append(s) } }
+        var entries: [CleanupEntry] = []
+        var emitted = Set<String>()
+        for s in suggestions {
+            if let g = s.group, let members = byGroup[g], members.count > 1 {
+                if emitted.insert(g).inserted {
+                    entries.append(.group(title: g, members: members.sorted { $0.item.size > $1.item.size }))
+                }
+            } else {
+                entries.append(.single(s))
+            }
+        }
+        return entries.sorted { $0.priority != $1.priority ? $0.priority < $1.priority : $0.size > $1.size }
+    }
 }
 
 public struct CleanupAdvisor: Sendable {
@@ -184,7 +236,7 @@ public struct CleanupAdvisor: Sendable {
                 suggestion = nil
             }
             guard let (title, explanation) = suggestion, let item = report.folder(path), item.size >= minimumSize else { continue }
-            found.append(CleanupSuggestion(item: item, title: title, priority: .review, explanation: explanation, action: .trashItem))
+            found.append(CleanupSuggestion(item: item, title: title, priority: .review, explanation: explanation, action: .trashItem, group: title))
         }
 
         // Old installers and archives in Downloads.

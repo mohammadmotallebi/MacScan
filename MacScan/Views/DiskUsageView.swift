@@ -38,6 +38,18 @@ struct DiskUsageView: View {
             Text("\(pending.item.path)\n\(pending.item.size.formatted(.byteCount(style: .file)))\(pending.item.isDirectory ? " in \(pending.item.fileCount.formatted()) files" : "")\n\nIt goes to the Trash, where you can restore it until you empty the Trash.")
         }
         .sheet(isPresented: $model.showingCleanupSheet) { CleanupSheet() }
+        .confirmationDialog("Move all to Trash?",
+                            isPresented: Binding(get: { model.pendingGroupTrash != nil }, set: { if !$0 { model.pendingGroupTrash = nil } }),
+                            presenting: model.pendingGroupTrash) { pending in
+            Button("Move \(pending.members.count) Folders to Trash", role: .destructive) { model.confirmTrashGroup(pending) }
+            Button("Cancel", role: .cancel) {}
+        } message: { pending in
+            let total = pending.members.reduce(Int64(0)) { $0 + $1.item.size }
+            Text("\(pending.title): \(pending.members.count) folders, \(total.formatted(.byteCount(style: .file)))\n\n"
+                 + pending.members.prefix(8).map { "• " + $0.item.path.replacingOccurrences(of: AppPaths.home.path, with: "~") }.joined(separator: "\n")
+                 + (pending.members.count > 8 ? "\n…and \(pending.members.count - 8) more" : "")
+                 + "\n\n\(pending.members.first?.explanation ?? "")")
+        }
         .confirmationDialog("Move contents to Trash?",
                             isPresented: Binding(get: { model.pendingEmpty != nil }, set: { if !$0 { model.pendingEmpty = nil } }),
                             presenting: model.pendingEmpty) { pending in
@@ -333,10 +345,15 @@ struct CleanupList: View {
             Divider()
             List {
                 ForEach(CleanupPriority.allCases, id: \.self) { priority in
-                    let items = model.suggestions.filter { $0.priority == priority }
-                    if !items.isEmpty {
+                    let entries = model.entries.filter { $0.priority == priority }
+                    if !entries.isEmpty {
                         Section(priority == .safe ? "Safe to clean: rebuilt or re-downloaded automatically" : "Review first: check before deleting") {
-                            ForEach(items) { CleanupSuggestionRow(suggestion: $0) }
+                            ForEach(entries) { entry in
+                                switch entry {
+                                case .single(let s): CleanupSuggestionRow(suggestion: s)
+                                case .group(let title, let members): CleanupGroupRow(title: title, members: members)
+                                }
+                            }
                         }
                     }
                 }
@@ -462,10 +479,15 @@ struct CleanupSheet: View {
                 .controlSize(.small)
                 List {
                     ForEach(CleanupPriority.allCases, id: \.self) { priority in
-                        let items = model.suggestions.filter { $0.priority == priority }
-                        if !items.isEmpty {
+                        let entries = model.entries.filter { $0.priority == priority }
+                        if !entries.isEmpty {
                             Section(priority.title) {
-                                ForEach(items) { CleanupPickRow(suggestion: $0) }
+                                ForEach(entries) { entry in
+                                    switch entry {
+                                    case .single(let s): CleanupPickRow(suggestion: s)
+                                    case .group(let title, let members): CleanupGroupPickRow(title: title, members: members)
+                                    }
+                                }
                             }
                         }
                     }
@@ -579,5 +601,90 @@ struct CleanupSummaryView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+    }
+}
+
+/// One row for many suggestions of the same kind (e.g. every project's node_modules), expandable.
+struct CleanupGroupRow: View {
+    @Environment(AppState.self) private var state
+    let title: String
+    let members: [CleanupSuggestion]
+    @State private var expanded = false
+
+    var body: some View {
+        let model = state.diskUsage
+        let total = members.reduce(Int64(0)) { $0 + $1.item.size }
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(members) { CleanupSuggestionRow(suggestion: $0) }
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "folder.fill.badge.gearshape")
+                    .font(.system(size: 22))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(title).font(.headline)
+                        PriorityBadge(priority: members.first?.priority ?? .review)
+                    }
+                    Text("\(members.count) folders in your projects")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text(members.first?.explanation ?? "")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(total.formatted(.byteCount(style: .file)))
+                        .font(.title3.monospacedDigit().weight(.semibold))
+                    HStack(spacing: 6) {
+                        Button(expanded ? "Hide" : "Show \(members.count)") { withAnimation { expanded.toggle() } }
+                        Button("Move All to Trash…", role: .destructive) { model.requestTrashGroup(title, members) }
+                            .disabled(model.isCleaning)
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+}
+
+/// A group in the Clean Up sheet: one checkbox for all members (mixed when only some are ticked), expandable.
+struct CleanupGroupPickRow: View {
+    @Environment(AppState.self) private var state
+    let title: String
+    let members: [CleanupSuggestion]
+    @State private var expanded = false
+
+    var body: some View {
+        let model = state.diskUsage
+        let ids = Set(members.map(\.id))
+        let ticked = members.filter { model.cleanupSelection.contains($0.id) }
+        let all = ticked.count == members.count
+        let tickedSize = ticked.reduce(Int64(0)) { $0 + $1.item.size }
+        let total = members.reduce(Int64(0)) { $0 + $1.item.size }
+        DisclosureGroup(isExpanded: $expanded) {
+            ForEach(members) { CleanupPickRow(suggestion: $0) }
+        } label: {
+            HStack(spacing: 8) {
+                Button {
+                    if all { model.cleanupSelection.subtract(ids) } else { model.cleanupSelection.formUnion(ids) }
+                } label: {
+                    Image(systemName: all ? "checkmark.square.fill" : (ticked.isEmpty ? "square" : "minus.square.fill"))
+                        .foregroundStyle(ticked.isEmpty ? Color.secondary : Color.accentColor)
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.plain)
+                .help(all ? "Untick all" : "Tick all")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(title) (\(members.count) folders)")
+                    Text(ticked.isEmpty || all ? "Expand to choose individual folders" : "\(ticked.count) of \(members.count) ticked · \(tickedSize.formatted(.byteCount(style: .file)))")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(total.formatted(.byteCount(style: .file))).monospacedDigit()
+            }
+        }
     }
 }

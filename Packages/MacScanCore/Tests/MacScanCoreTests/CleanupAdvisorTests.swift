@@ -90,6 +90,32 @@ extension CleanupAction {
     var isManual: Bool { if case .manual = self { true } else { false } }
 }
 
+@Suite struct CleanupEntryTests {
+    @Test func groupsRepeatedDependencyFolders() throws {
+        let home = try TempDir()
+        try home.write("Library/Caches/a/x", Data(count: 30_000))
+        try home.write("p1/node_modules/a/i.js", Data(count: 40_000))
+        try home.write("p2/node_modules/a/i.js", Data(count: 20_000))
+        try home.write("p3/node_modules/a/i.js", Data(count: 10_000))
+        try home.write("py/.venv/lib/x.py", Data(count: 15_000))      // only one venv: stays a single row
+        let report = DiskUsageScanner(root: home.url, listedFileMinimum: 1).scan()
+        let suggestions = CleanupAdvisor(home: home.url, minimumSize: 1).suggestions(for: report)
+        let entries = CleanupEntry.entries(for: suggestions)
+
+        #expect(entries.count == 3)
+        #expect(entries.first?.title == "App caches", "safe items stay first")
+        let node = try #require(entries.first { $0.title == "Node.js dependencies" })
+        guard case .group(_, let members) = node else { Issue.record("not grouped"); return }
+        #expect(members.count == 3)
+        #expect(members.map { $0.item.size } == members.map { $0.item.size }.sorted(by: >), "biggest first")
+        #expect(node.size == members.reduce(0) { $0 + $1.item.size })
+        #expect(node.priority == .review)
+        let venv = try #require(entries.first { $0.title == "Python virtual environment" })
+        #expect(venv.members.count == 1)
+        if case .group = venv { Issue.record("a single member must not be a group") }
+    }
+}
+
 @Suite struct CleanupRunnerTests {
     /// Moves "trashed" items into a test folder instead of the real Trash.
     struct FakeTrash: Sendable {

@@ -20,6 +20,13 @@ final class DiskUsageModel {
         let item: DiskItem
     }
 
+    /// "Move All to Trash" for a group of suggestions (e.g. every node_modules), waiting for confirmation.
+    struct PendingGroupTrash: Identifiable {
+        let id = UUID()
+        let title: String
+        let members: [CleanupSuggestion]
+    }
+
     /// "Move contents to Trash" for a suggestion like Caches, waiting for confirmation.
     struct PendingEmpty: Identifiable {
         let id = UUID()
@@ -36,6 +43,7 @@ final class DiskUsageModel {
     var currentFolder: String?
     var pendingTrash: PendingTrash?
     var pendingEmpty: PendingEmpty?
+    var pendingGroupTrash: PendingGroupTrash?
     /// Folders and files that are usually safe or worthwhile to delete, most worthwhile first.
     var suggestions: [CleanupSuggestion] = []
     /// Suggestion per path, for badges in the other lists.
@@ -94,6 +102,20 @@ final class DiskUsageModel {
             let list = CleanupAdvisor().suggestions(for: report)
             await MainActor.run { self?.setSuggestions(list) }
         }
+    }
+
+    /// Suggestions as list rows: repeated kinds (node_modules, .venv, Pods) are grouped into one row.
+    var entries: [CleanupEntry] { CleanupEntry.entries(for: suggestions) }
+
+    func requestTrashGroup(_ title: String, _ members: [CleanupSuggestion]) {
+        let movable = members.filter { $0.action == .trashItem && trashRefusal($0.item) == nil }
+        guard !movable.isEmpty else { return }
+        pendingGroupTrash = PendingGroupTrash(title: title, members: movable)
+    }
+
+    /// Called only after the user confirms.
+    func confirmTrashGroup(_ pending: PendingGroupTrash) {
+        runCleanup(pending.members, showSummary: false)
     }
 
     func size(of priority: CleanupPriority) -> Int64 {
