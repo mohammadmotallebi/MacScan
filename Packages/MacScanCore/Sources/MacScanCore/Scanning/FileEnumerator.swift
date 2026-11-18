@@ -9,6 +9,8 @@ public struct EnumerationResult: Sendable {
     public var persistenceFindings: [Finding] = []
     /// Units already described by a persistence finding (no generic "No issues found" row).
     public var coveredUnits: Set<String> = []
+    /// Startup items collected by a Startup Items target (nil when there was none).
+    public var startupSnapshot: StartupSnapshot?
     /// Findings from the running-process inventory (engine `.processes`).
     public var processFindings: [Finding] = []
     /// Executables of running programs; their signature verdict comes from the process finding.
@@ -64,6 +66,7 @@ public struct FileEnumerator: Sendable {
             case .startupItems:
                 let inventory = try PersistenceScanner(locations: persistenceLocations).collect()
                 walker.result.persistenceFindings += inventory.findings
+                walker.result.startupSnapshot = inventory.snapshot
                 walker.result.coveredUnits.formUnion(inventory.coveredUnits)
                 for path in inventory.scanPaths {
                     try walker.walk(URL(fileURLWithPath: path), applicationsMode: false)

@@ -41,6 +41,11 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("downloads-seen.json")
     }
 
+    /// The startup items seen by the last Startup Items scan (to report what changed since).
+    public static var startupBaselineFile: URL {
+        applicationSupport.appendingPathComponent("startup-baseline.json")
+    }
+
     /// Held while a background scan runs, so the scheduled scan and the Downloads watcher take turns.
     public static var backgroundLockFile: URL {
         applicationSupport.appendingPathComponent("background.lock")

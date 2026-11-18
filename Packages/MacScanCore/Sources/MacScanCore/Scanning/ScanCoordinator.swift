@@ -88,6 +88,7 @@ public struct ScanCoordinator: Sendable {
         session.issues = enumeration.issues
         session.skippedCount = enumeration.skippedCount
         session.notes += enumeration.notes
+        session.startupSnapshot = enumeration.startupSnapshot
         session.itemsTotal = enumeration.items.count
         for issue in enumeration.issues.prefix(50) {
             logger.warning("Cannot read \(issue.path): \(issue.message)")

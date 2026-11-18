@@ -85,6 +85,8 @@ public struct PersistenceInventory: Sendable {
     public var programPaths: [String] = []
     /// Paths already described by a persistence finding (no extra "No issues found" rows needed).
     public var coveredUnits: Set<String> = []
+    /// What each item does, for change tracking between scans.
+    public var snapshot: StartupSnapshot = [:]
 }
 
 /// Lists everything set to start automatically (similar in spirit to Objective-See's KnockKnock) and
@@ -253,6 +255,10 @@ public struct PersistenceScanner: Sendable {
             }
         }
 
+        for entry in inv.entries {
+            let (key, state) = StartupItemState.make(entry)
+            inv.snapshot[key] = state
+        }
         return inv
     }
 

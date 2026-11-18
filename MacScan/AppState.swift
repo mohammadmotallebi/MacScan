@@ -356,6 +356,9 @@ final class AppState {
     }
 
     private func scanFinished(_ session: ScanSession) {
+        var session = session
+        // Here, as the user, and not in the coordinator: an administrator scan runs that as root.
+        StartupChangeTracker().apply(to: &session)
         isScanning = false
         progress = nil
         scanTask = nil

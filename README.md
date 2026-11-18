@@ -169,6 +169,14 @@ the integrity checks. Items are flagged when they:
 - impersonate a known publisher
 
 Nothing is disabled or deleted. Use **Reveal in Finder** and remove items yourself if you decide to.
+
+**What changed since the last scan.** Every Startup Items scan (including the scheduled one) is compared
+with the previous one. Items that were added, or that now start a different program, use different
+arguments, have a different signer or (for scripts and shell files) different contents, get a **NEW** or
+**CHANGED** badge, and the details say what changed. A **New or changed** checkbox above the results shows
+only those, and the scan notes also list removed items. An app update that replaces a program with one from
+the same signer doesn't count as a change. The first scan only saves the baseline. A scheduled scan sends a
+notification when items were added or changed, even if nothing about them is flagged.
 Login items you manage in System Settings › General › Login Items, and configuration profiles, need admin
 rights to list. Review them in System Settings.
 
@@ -273,6 +281,7 @@ or turn on auto-lookup for flagged files only.
 | Scan history (JSON, last 100 scans) | `~/Library/Application Support/MacScan/History/` |
 | Ignore list | `~/Library/Application Support/MacScan/ignored.json` |
 | Downloads already seen (only with "Scan new downloads") | `~/Library/Application Support/MacScan/downloads-seen.json` |
+| Startup items of the last scan (to report changes) | `~/Library/Application Support/MacScan/startup-baseline.json` |
 | Launch agents (only while background scans are on) | `~/Library/LaunchAgents/com.local.MacScan.*.plist` |
 | ClamAV database + `freshclam.conf` | `~/Library/Application Support/MacScan/` |
 | Settings and folder list | `defaults read com.local.MacScan` |

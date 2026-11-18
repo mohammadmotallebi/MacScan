@@ -27,6 +27,8 @@ public struct BackgroundScanEnvironment: Sendable {
     public var downloads: DownloadsTracker
     public var notifier: any BackgroundNotifying
     public var logger: FileLogger
+    /// Marks new and changed startup items in scheduled scans. Nil turns that off (tests).
+    public var startupTracker: StartupChangeTracker?
     /// How long a new download must stay unchanged before it's scanned, and the longest wait for that.
     public var settleInterval: Duration = .seconds(2)
     public var settleTimeout: Duration = .seconds(600)
@@ -49,6 +51,12 @@ public struct BackgroundScanEnvironment: Sendable {
         self.logger = logger
     }
 
+    func with(startupTracker: StartupChangeTracker?) -> BackgroundScanEnvironment {
+        var copy = self
+        copy.startupTracker = startupTracker
+        return copy
+    }
+
     /// The user's real settings, ignore list, history and Downloads folder. Never elevated.
     public static func live(notifier: any BackgroundNotifying) -> BackgroundScanEnvironment {
         let settings = SettingsStore.load()
@@ -67,6 +75,7 @@ public struct BackgroundScanEnvironment: Sendable {
             notifier: notifier,
             logger: .shared
         )
+        .with(startupTracker: StartupChangeTracker())
     }
 }
 
@@ -149,6 +158,7 @@ public enum BackgroundScanWorker {
         let previous = env.historyStore.loadAll().first { $0.trigger == .scheduled }
         var session = await env.coordinator.run(targets: targets) { _ in }
         session.trigger = .scheduled
+        if let tracker = env.startupTracker { tracker.apply(to: &session) } else { session.startupSnapshot = nil }
         await finish(session, previous: previous, env)
         return [session]
     }
@@ -228,7 +238,18 @@ public enum BackgroundScanWorker {
             let known = Set(previous.flagged.map(key))
             flagged = flagged.filter { !known.contains(key($0)) }
         }
-        guard !flagged.isEmpty else { return nil }
+        // Startup items that appeared or changed since the last scan are worth a notification on their
+        // own, even when nothing about them is flagged.
+        let startup = session.startupChanges.map { $0.added.count + $0.changed.count } ?? 0
+        guard !flagged.isEmpty else {
+            guard startup > 0, let changes = session.startupChanges else { return nil }
+            var names = (changes.added + changes.changed).prefix(3).joined(separator: ", ")
+            if startup > 3 { names += " and \(startup - 3) more" }
+            let title = changes.changed.isEmpty
+                ? "MacScan: \(startup) new startup \(startup == 1 ? "item" : "items")"
+                : "MacScan: \(startup) new or changed startup \(startup == 1 ? "item" : "items")"
+            return BackgroundNotification(title: title, body: names, sessionID: session.id)
+        }
 
         var seenUnits = Set<String>()
         let units = flagged.map(\.unitPath).filter { seenUnits.insert($0).inserted }
@@ -244,6 +265,7 @@ public enum BackgroundScanWorker {
         case .scheduled: previous == nil ? "Scheduled scan: \(names)" : "New since the last scheduled scan: \(names)"
         case nil: names
         }
-        return BackgroundNotification(title: title, body: body, sessionID: session.id)
+        let suffix = startup > 0 ? " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" : ""
+        return BackgroundNotification(title: title, body: body + suffix, sessionID: session.id)
     }
 }

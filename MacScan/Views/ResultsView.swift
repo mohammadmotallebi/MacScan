@@ -7,6 +7,7 @@ struct ResultsView: View {
 
     @State private var filter: SeverityFilter = .all
     @State private var search = ""
+    @State private var changedOnly = false
     @State private var selection: Set<Finding.ID> = []
     @State private var sortOrder = [KeyPathComparator(\Finding.severity, order: .reverse)]
 
@@ -14,9 +15,13 @@ struct ResultsView: View {
         let query = search.trimmingCharacters(in: .whitespaces)
         return session.findings
             .filter { filter.matches($0.severity) }
+            .filter { !changedOnly || !hasChanges || $0.change != nil }
             .filter { query.isEmpty || $0.path.localizedCaseInsensitiveContains(query) || $0.reason.localizedCaseInsensitiveContains(query) }
             .sorted(using: sortOrder)
     }
+
+    /// Startup items that are new or changed since the previous Startup Items scan.
+    private var hasChanges: Bool { session.findings.contains { $0.change != nil } }
 
     private var selectedFinding: Finding? {
         guard selection.count == 1, let id = selection.first else { return nil }
@@ -34,6 +39,11 @@ struct ResultsView: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .frame(maxWidth: 420)
+                if hasChanges {
+                    Toggle("New or changed (\(session.findings.filter { $0.change != nil }.count))", isOn: $changedOnly)
+                        .toggleStyle(.checkbox)
+                        .help("Show only startup items that were added or changed since the previous Startup Items scan")
+                }
                 Spacer()
                 TextField("Filter by path or reason", text: $search)
                     .textFieldStyle(.roundedBorder)
@@ -73,6 +83,7 @@ struct ResultsView: View {
                         if state.vtLookupsInFlight.contains(f.id) {
                             ProgressView().controlSize(.mini)
                         }
+                        if let change = f.change { ChangeBadge(change: change) }
                         Text(f.reason).lineLimit(2)
                     }
                     .help(f.detail ?? f.reason)
@@ -146,6 +157,7 @@ struct FindingDetailView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     SeverityBadge(severity: finding.severity)
+                    if let change = finding.change { ChangeBadge(change: change) }
                     Text(finding.reason).font(.headline).textSelection(.enabled)
                 }
                 Text(finding.path)
@@ -203,6 +215,21 @@ struct SeverityBadge: View {
             .font(.caption.weight(.semibold))
             .foregroundStyle(severity.color)
             .labelStyle(.titleAndIcon)
+    }
+}
+
+/// Marks a startup item that is new or changed since the previous Startup Items scan.
+struct ChangeBadge: View {
+    let change: FindingChange
+
+    var body: some View {
+        Text(change.title.uppercased())
+            .font(.caption2.weight(.bold))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(.blue.opacity(0.18), in: Capsule())
+            .foregroundStyle(.blue)
+            .fixedSize()
     }
 }
 

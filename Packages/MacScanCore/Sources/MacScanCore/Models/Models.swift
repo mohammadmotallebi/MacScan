@@ -72,6 +72,8 @@ public struct Finding: Codable, Hashable, Identifiable, Sendable {
     /// The "unit" this finding belongs to: the top-level .app for files inside bundles, otherwise `path`.
     public var unitPath: String
     public var date: Date
+    /// Set on startup items that are new or changed since the previous Startup Items scan.
+    public var change: FindingChange?
 
     public init(
         id: UUID = UUID(),
@@ -199,6 +201,10 @@ public struct ScanSession: Codable, Hashable, Identifiable, Sendable {
     public var ignoredCount: Int
     public var issues: [ScanIssue]
     public var findings: [Finding]
+    /// Startup items as collected by this scan; consumed by `StartupChangeTracker.apply` and then cleared.
+    public var startupSnapshot: StartupSnapshot?
+    /// What was added, changed or removed since the previous Startup Items scan (nil for the first one).
+    public var startupChanges: StartupChangeSummary?
 
     public init(
         id: UUID = UUID(),
