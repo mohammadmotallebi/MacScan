@@ -238,3 +238,81 @@ public struct CleanupAdvisor: Sendable {
         return "\(days) days"
     }
 }
+
+// MARK: - Clean up several suggestions at once
+
+/// What happened to one suggestion during a clean-up.
+public struct CleanupOutcome: Sendable, Equatable {
+    public let suggestion: CleanupSuggestion
+    /// Paths moved to the Trash: the item itself, or the folder's contents.
+    public let moved: [String]
+    /// Paths that couldn't be moved, with the reason.
+    public let failed: [String: String]
+    /// The whole suggestion was cleaned (item moved, or folder fully emptied).
+    public var complete: Bool { failed.isEmpty }
+}
+
+/// Moves suggestions to the Trash: `.trashItem` moves the item, `.trashContents` moves everything inside the folder.
+/// `.manual` suggestions are never touched. Every path is checked with `Uninstaller.isSafeToRemove` first.
+public struct CleanupRunner: Sendable {
+    let trash: @Sendable (URL) throws -> Void
+
+    public init(trash: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }) {
+        self.trash = trash
+    }
+
+    public func run(_ suggestions: [CleanupSuggestion], progress: (@Sendable (Int, Int, String) -> Void)? = nil) -> [CleanupOutcome] {
+        let runnable = suggestions.filter { $0.action == .trashItem || $0.action == .trashContents }
+        var outcomes: [CleanupOutcome] = []
+        for (index, suggestion) in runnable.enumerated() {
+            if Task.isCancelled { break }
+            progress?(index, runnable.count, suggestion.title)
+            var moved: [String] = []
+            var failed: [String: String] = [:]
+            let targets: [URL]
+            switch suggestion.action {
+            case .trashContents:
+                targets = (try? FileManager.default.contentsOfDirectory(at: suggestion.item.url, includingPropertiesForKeys: nil, options: [])) ?? []
+            default:
+                targets = [suggestion.item.url]
+            }
+            for url in targets {
+                guard Uninstaller.isSafeToRemove(url.path) else {
+                    failed[url.path] = "Protected location"
+                    continue
+                }
+                do {
+                    try trash(url)
+                    moved.append(url.path)
+                } catch {
+                    failed[url.path] = PermissionErrors.isPermissionDenied(error)
+                        ? "Permission denied (in use, or protected by macOS)" : error.localizedDescription
+                }
+            }
+            outcomes.append(CleanupOutcome(suggestion: suggestion, moved: moved, failed: failed))
+        }
+        progress?(runnable.count, runnable.count, "")
+        return outcomes
+    }
+}
+
+extension DiskUsageReport {
+    /// Applies a clean-up's outcomes: removed items leave the report, fully emptied folders stay with size 0.
+    /// (For partly emptied folders only the listed sub-items that moved are subtracted.)
+    public mutating func apply(_ outcomes: [CleanupOutcome]) {
+        for outcome in outcomes {
+            let item = outcome.suggestion.item
+            switch outcome.suggestion.action {
+            case .trashItem where !outcome.moved.isEmpty:
+                markRemoved(folder(item.path) ?? item)
+            case .trashContents where outcome.failed.isEmpty:
+                markEmptied(item.path)
+            case .trashContents:
+                let moved = Set(outcome.moved)
+                for child in children(of: item.path) where moved.contains(child.path) { markRemoved(child) }
+            default:
+                break
+            }
+        }
+    }
+}

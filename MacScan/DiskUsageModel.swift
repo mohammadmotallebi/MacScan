@@ -111,36 +111,81 @@ final class DiskUsageModel {
 
     /// Called only after the user confirms: moves everything inside the folder to the Trash, keeping the folder.
     func confirmEmpty(_ pending: PendingEmpty) {
-        let folder = pending.suggestion.item
-        guard !isCleaning else { return }
+        runCleanup([pending.suggestion], showSummary: false)
+    }
+
+    // MARK: - Clean Up (several suggestions at once)
+
+    struct CleanupProgress: Equatable {
+        var done: Int
+        var total: Int
+        var current: String
+    }
+
+    struct CleanupSummary: Equatable {
+        var freed: Int64
+        var cleaned: Int
+        /// Path → reason for everything that couldn't be moved.
+        var failures: [String: String]
+    }
+
+    var showingCleanupSheet = false
+    /// Paths of the suggestions ticked in the Clean Up sheet.
+    var cleanupSelection: Set<String> = []
+    var cleanupProgress: CleanupProgress?
+    var cleanupSummary: CleanupSummary?
+
+    /// Suggestions the app can clean by itself (not the ones that need manual steps).
+    var cleanableSuggestions: [CleanupSuggestion] {
+        suggestions.filter { $0.action == .trashItem || $0.action == .trashContents }
+    }
+
+    /// Opens the Clean Up sheet with every "Safe to clean" item ticked and "Review first" items unticked.
+    func openCleanup() {
+        cleanupSelection = Set(cleanableSuggestions.filter { $0.priority == .safe }.map(\.id))
+        cleanupSummary = nil
+        cleanupProgress = nil
+        showingCleanupSheet = true
+    }
+
+    func selectForCleanup(_ priority: CleanupPriority?) {
+        let pool = cleanableSuggestions.filter { priority == nil || $0.priority == priority }
+        cleanupSelection = Set(pool.map(\.id))
+    }
+
+    var selectedForCleanup: [CleanupSuggestion] {
+        cleanableSuggestions.filter { cleanupSelection.contains($0.id) }
+    }
+
+    /// Called only after the user confirms. Moves the selected suggestions to the Trash in the background.
+    func runCleanup(_ selected: [CleanupSuggestion], showSummary: Bool = true) {
+        guard !isCleaning, !selected.isEmpty else { return }
         isCleaning = true
+        cleanupSummary = nil
+        cleanupProgress = CleanupProgress(done: 0, total: selected.count, current: selected[0].title)
+        logger.info("Disk usage clean-up started: \(selected.count) item(s), \(selected.reduce(Int64(0)) { $0 + $1.item.size }) bytes")
         Task.detached(priority: .userInitiated) { [weak self] in
-            let fm = FileManager.default
-            let entries = (try? fm.contentsOfDirectory(at: folder.url, includingPropertiesForKeys: nil, options: [])) ?? []
-            var moved: [String] = []
-            var failed: [String] = []
-            for url in entries {
-                guard Uninstaller.isSafeToRemove(url.path) else { failed.append(url.path); continue }
-                do {
-                    try fm.trashItem(at: url, resultingItemURL: nil)
-                    moved.append(url.path)
-                } catch {
-                    failed.append(url.path)
-                }
+            let outcomes = CleanupRunner().run(selected) { done, total, title in
+                Task { @MainActor in self?.cleanupProgress = CleanupProgress(done: done, total: total, current: title) }
             }
             await MainActor.run {
                 guard let self else { return }
+                // Freed space: what the report says before and after applying the outcomes.
+                let before = self.report?.totalSize ?? 0
+                self.report?.apply(outcomes)
+                let freed = before - (self.report?.totalSize ?? before)
+                var failures: [String: String] = [:]
+                for outcome in outcomes { failures.merge(outcome.failed) { a, _ in a } }
+                let summary = CleanupSummary(freed: freed, cleaned: outcomes.filter(\.complete).count, failures: failures)
+                for outcome in outcomes {
+                    self.logger.info("Clean-up: \(outcome.suggestion.item.path): \(outcome.moved.count) moved to Trash, \(outcome.failed.count) not moved")
+                }
                 self.isCleaning = false
-                self.logger.info("Disk usage: user moved \(moved.count) item(s) from \(folder.path) to Trash, \(failed.count) not moved")
-                if failed.isEmpty {
-                    self.report?.markEmptied(folder.path)
-                } else if let report = self.report {
-                    // Only what was really moved: known folders and listed files. Small files stay counted.
-                    let movedSet = Set(moved)
-                    for child in report.children(of: folder.path) where movedSet.contains(child.path) {
-                        self.report?.markRemoved(child)
-                    }
-                    self.errorMessage = "\(failed.count) of \(entries.count) items in \(folder.name) couldn't be moved (in use, or protected by macOS). Quit the apps that use them and try again."
+                self.cleanupProgress = nil
+                if showSummary {
+                    self.cleanupSummary = summary
+                } else if !failures.isEmpty {
+                    self.errorMessage = "\(failures.count) item\(failures.count == 1 ? "" : "s") couldn't be moved (in use, or protected by macOS). Quit the apps that use them and try again."
                 }
                 self.refreshSuggestions()
             }

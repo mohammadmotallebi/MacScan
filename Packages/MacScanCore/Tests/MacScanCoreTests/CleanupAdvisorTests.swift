@@ -89,3 +89,70 @@ import Testing
 extension CleanupAction {
     var isManual: Bool { if case .manual = self { true } else { false } }
 }
+
+@Suite struct CleanupRunnerTests {
+    /// Moves "trashed" items into a test folder instead of the real Trash.
+    struct FakeTrash: Sendable {
+        let folder: URL
+        func move(_ url: URL) throws {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: url, to: folder.appendingPathComponent(UUID().uuidString + "-" + url.lastPathComponent))
+        }
+    }
+
+    @Test func cleansSelectedSuggestionsAndUpdatesTheReport() throws {
+        let home = try TempDir()
+        try home.write("Library/Caches/a/x", Data(count: 30_000))
+        try home.write("Library/Caches/b/y", Data(count: 30_000))
+        try home.write("Projects/web/node_modules/r/i.js", Data(count: 40_000))
+        try home.write("Library/Containers/com.docker.docker/Data/vms/0/Docker.raw", Data(count: 80_000))
+        var report = DiskUsageScanner(root: home.url, listedFileMinimum: 1).scan()
+        let suggestions = CleanupAdvisor(home: home.url, minimumSize: 1).suggestions(for: report)
+        let root = Paths.canonical(home.url).path
+        let total = report.totalSize
+
+        let fake = FakeTrash(folder: home.url.appendingPathComponent("FakeTrash"))
+        let outcomes = CleanupRunner(trash: fake.move).run(suggestions)
+
+        // Docker is manual: never touched.
+        #expect(!outcomes.contains { $0.suggestion.item.path.contains("docker") })
+        #expect(FileManager.default.fileExists(atPath: root + "/Library/Containers/com.docker.docker/Data/vms/0/Docker.raw"))
+        // Caches emptied but kept; node_modules gone.
+        #expect(FileManager.default.fileExists(atPath: root + "/Library/Caches"))
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: root + "/Library/Caches")
+        #expect(remaining.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: root + "/Projects/web/node_modules"))
+        let allComplete = outcomes.allSatisfy { $0.complete }
+        #expect(allComplete)
+
+        let freed = outcomes.reduce(Int64(0)) { $0 + $1.suggestion.item.size }
+        report.apply(outcomes)
+        #expect(report.totalSize == total - freed)
+        #expect(report.folder(root + "/Library/Caches")?.size == 0)
+        #expect(report.folder(root + "/Projects/web/node_modules") == nil)
+    }
+
+    @Test func reportsFailuresAndKeepsGoing() throws {
+        let home = try TempDir()
+        try home.write("Library/Caches/a/x", Data(count: 30_000))
+        try home.write("Library/Caches/b/y", Data(count: 30_000))
+        var report = DiskUsageScanner(root: home.url, listedFileMinimum: 1).scan()
+        let suggestions = CleanupAdvisor(home: home.url, minimumSize: 1).suggestions(for: report)
+        let fake = FakeTrash(folder: home.url.appendingPathComponent("FakeTrash"))
+        // "b" is in use and can't be moved.
+        let outcomes = CleanupRunner(trash: { url in
+            if url.lastPathComponent == "b" { throw CocoaError(.fileWriteNoPermission) }
+            try fake.move(url)
+        }).run(suggestions)
+        let caches = try #require(outcomes.first)
+        #expect(caches.moved.count == 1)
+        #expect(caches.failed.count == 1)
+        #expect(caches.failed.values.first?.contains("Permission denied") == true)
+        #expect(!caches.complete)
+
+        let root = Paths.canonical(home.url).path
+        let bSize = try #require(report.folder(root + "/Library/Caches/b")).size
+        report.apply(outcomes)
+        #expect(report.folder(root + "/Library/Caches")?.size == bSize, "only what moved is subtracted")
+    }
+}

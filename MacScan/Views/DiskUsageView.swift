@@ -37,6 +37,7 @@ struct DiskUsageView: View {
         } message: { pending in
             Text("\(pending.item.path)\n\(pending.item.size.formatted(.byteCount(style: .file)))\(pending.item.isDirectory ? " in \(pending.item.fileCount.formatted()) files" : "")\n\nIt goes to the Trash, where you can restore it until you empty the Trash.")
         }
+        .sheet(isPresented: $model.showingCleanupSheet) { CleanupSheet() }
         .confirmationDialog("Move contents to Trash?",
                             isPresented: Binding(get: { model.pendingEmpty != nil }, set: { if !$0 { model.pendingEmpty = nil } }),
                             presenting: model.pendingEmpty) { pending in
@@ -317,6 +318,14 @@ struct CleanupList: View {
                     .foregroundStyle(.orange)
                 Spacer()
                 if model.isCleaning { ProgressView().controlSize(.small); Text("Moving to Trash…").foregroundStyle(.secondary) }
+                Button {
+                    model.openCleanup()
+                } label: {
+                    Label("Clean Up…", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.isCleaning || model.cleanableSuggestions.isEmpty)
+                .help("Choose what to move to the Trash. \"Safe to clean\" items are ticked for you.")
             }
             .font(.callout.weight(.medium))
             .padding(.horizontal, 12)
@@ -415,5 +424,160 @@ struct PriorityBadge: View {
             .padding(.horizontal, 6).padding(.vertical, 1)
             .background((priority == .safe ? Color.green : Color.orange).opacity(0.22), in: Capsule())
             .foregroundStyle(priority == .safe ? Color.green : Color.orange)
+    }
+}
+
+/// "Clean Up": pick suggestions (safe ones are ticked), confirm once, watch progress, see what was freed.
+struct CleanupSheet: View {
+    @Environment(AppState.self) private var state
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirming = false
+
+    var body: some View {
+        let model = state.diskUsage
+        let selected = model.selectedForCleanup
+        let selectedSize = selected.reduce(Int64(0)) { $0 + $1.item.size }
+        let reviewCount = selected.filter { $0.priority == .review }.count
+        VStack(alignment: .leading, spacing: 12) {
+            if let summary = model.cleanupSummary {
+                CleanupSummaryView(summary: summary)
+            } else if let progress = model.cleanupProgress {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Cleaning Up…").font(.title2.weight(.semibold))
+                    ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
+                    Text(progress.current.isEmpty ? "Finishing…" : "\(progress.done + 1) of \(progress.total): \(progress.current)")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+            } else {
+                Text("Clean Up").font(.title2.weight(.semibold))
+                Text("Ticked items move to the Trash, where you can restore them until you empty it. \"Safe to clean\" items are rebuilt or re-downloaded automatically; check \"Review first\" items before ticking them.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button("Safe Items Only") { model.selectForCleanup(.safe) }
+                    Button("All") { model.selectForCleanup(nil) }
+                    Button("None") { model.cleanupSelection = [] }
+                }
+                .controlSize(.small)
+                List {
+                    ForEach(CleanupPriority.allCases, id: \.self) { priority in
+                        let items = model.suggestions.filter { $0.priority == priority }
+                        if !items.isEmpty {
+                            Section(priority.title) {
+                                ForEach(items) { CleanupPickRow(suggestion: $0) }
+                            }
+                        }
+                    }
+                }
+                .frame(minHeight: 320)
+            }
+
+            HStack {
+                if model.cleanupSummary == nil && model.cleanupProgress == nil {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(selected.count) selected · \(selectedSize.formatted(.byteCount(style: .file)))").monospacedDigit()
+                        if reviewCount > 0 {
+                            Text("Includes \(reviewCount) \"Review first\" item\(reviewCount == 1 ? "" : "s")").font(.caption).foregroundStyle(.orange)
+                        }
+                    }
+                }
+                Spacer()
+                if model.cleanupSummary != nil {
+                    Button("Open Trash") { NSWorkspace.shared.open(AppPaths.home.appendingPathComponent(".Trash")) }
+                    Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                } else if model.cleanupProgress == nil {
+                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Move to Trash…", role: .destructive) { confirming = true }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .disabled(selected.isEmpty)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 620)
+        .interactiveDismissDisabled(model.isCleaning)
+        .confirmationDialog("Move \(selected.count) item\(selected.count == 1 ? "" : "s") to the Trash?", isPresented: $confirming) {
+            Button("Move \(selectedSize.formatted(.byteCount(style: .file))) to Trash", role: .destructive) { model.runCleanup(selected) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(selected.map { "• \($0.title)\($0.action == .trashContents ? " (contents)" : ""): \($0.item.size.formatted(.byteCount(style: .file)))" }
+                .prefix(12).joined(separator: "\n")
+                + (selected.count > 12 ? "\n…and \(selected.count - 12) more" : "")
+                + "\n\nQuit the apps that use these files first. Nothing is deleted permanently until you empty the Trash.")
+        }
+    }
+}
+
+struct CleanupPickRow: View {
+    @Environment(AppState.self) private var state
+    let suggestion: CleanupSuggestion
+
+    var body: some View {
+        let model = state.diskUsage
+        let manual: String? = { if case .manual(let how) = suggestion.action { how } else { nil } }()
+        HStack(alignment: .top, spacing: 8) {
+            Toggle("", isOn: Binding(
+                get: { model.cleanupSelection.contains(suggestion.id) },
+                set: { on in if on { model.cleanupSelection.insert(suggestion.id) } else { model.cleanupSelection.remove(suggestion.id) } }
+            ))
+            .labelsHidden()
+            .toggleStyle(.checkbox)
+            .disabled(manual != nil)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(suggestion.title + (suggestion.action == .trashContents ? " (contents)" : ""))
+                Text(suggestion.item.path.replacingOccurrences(of: AppPaths.home.path, with: "~"))
+                    .font(.caption.monospaced()).foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+                if let manual {
+                    Text("Clean this yourself: \(manual)").font(.caption).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .help(suggestion.explanation)
+            Spacer()
+            Text(suggestion.item.size.formatted(.byteCount(style: .file)))
+                .monospacedDigit()
+                .foregroundStyle(manual == nil ? .primary : .secondary)
+        }
+        .opacity(manual == nil ? 1 : 0.7)
+    }
+}
+
+struct CleanupSummaryView: View {
+    let summary: DiskUsageModel.CleanupSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(summary.failures.isEmpty ? "Cleaned up" : "Partly cleaned up",
+                  systemImage: summary.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(summary.failures.isEmpty ? .green : .orange)
+            Text("Moved \(summary.freed.formatted(.byteCount(style: .file))) to the Trash (\(summary.cleaned) item\(summary.cleaned == 1 ? "" : "s") fully cleaned). Empty the Trash to free the space.")
+            if !summary.failures.isEmpty {
+                Text("Not moved (\(summary.failures.count))").font(.headline)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(summary.failures.sorted(by: { $0.key < $1.key }), id: \.key) { path, reason in
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(path.replacingOccurrences(of: AppPaths.home.path, with: "~")).font(.caption.monospaced()).textSelection(.enabled)
+                                    Text(reason).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 200)
+                Text("Files in use can't be moved: quit the apps that use them and run Clean Up again.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
     }
 }
