@@ -57,6 +57,73 @@ import Testing
         #expect(!findings.contains { $0.severity == .clean })
     }
 
+    /// Builds an app shaped like the launcher a Chromium browser creates for an installed website.
+    func makeShortcut(in dir: TempDir, name: String, bundleID: String, sign: Bool = true) throws -> URL {
+        let app = dir.url.appendingPathComponent("\(name).app")
+        let macos = app.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macos, withIntermediateDirectories: true)
+        try FileManager.default.copyItem(atPath: "/usr/bin/true", toPath: macos.appendingPathComponent("app_mode_loader").path)
+        let plist: [String: Any] = ["CFBundleExecutable": "app_mode_loader", "CFBundleIdentifier": bundleID, "CFBundleName": name, "CFBundlePackageType": "APPL"]
+        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0).write(to: app.appendingPathComponent("Contents/Info.plist"))
+        if sign { try shell(codesign, ["--force", "--deep", "--sign", "-", app.path]) }
+        return app
+    }
+
+    @Test func webAppShortcutBundleIDs() {
+        let id = "agimnkijcaahngcdmfeangaknmldooml"
+        #expect(WebAppShortcut.browser(forBundleID: "com.google.Chrome.app.\(id)") == "Chrome")
+        #expect(WebAppShortcut.browser(forBundleID: "com.microsoft.edgemac.app.\(id)") == "Edge")
+        #expect(WebAppShortcut.browser(forBundleID: "com.brave.Browser.app.\(id)") == "Brave")
+        #expect(WebAppShortcut.browser(forBundleID: "com.google.Chrome") == nil)
+        #expect(WebAppShortcut.browser(forBundleID: "com.google.Chrome.app.short") == nil)
+        #expect(WebAppShortcut.browser(forBundleID: "com.google.Chrome.app.\(id.dropLast())z") == nil, "extension IDs use a to p only")
+        #expect(WebAppShortcut.browser(forBundleID: "com.google.Chrome.helper.\(id)") == nil)
+    }
+
+    @Test func chromeWebAppShortcutIsCleanNotImpersonation() async throws {
+        let dir = try TempDir()
+        let bundleID = "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml"
+        let app = try makeShortcut(in: dir, name: "YouTube", bundleID: bundleID)
+        let findings = try await engine.checkBundle(app, context: .test)
+        #expect(findings.count == 1)
+        #expect(findings.first?.severity == .clean)
+        #expect(findings.first?.reason == "Chrome web-app shortcut (signed on this Mac by Chrome)")
+        #expect(findings.first?.detail?.contains(bundleID) == true)
+
+        // A running shortcut isn't an impersonation threat either.
+        let loader = app.appendingPathComponent("Contents/MacOS/app_mode_loader").path
+        #expect(WebAppShortcut.browser(ofProgram: loader, status: CodeSigning.status(of: URL(fileURLWithPath: loader))) == "Chrome")
+    }
+
+    /// Everything that only looks like a shortcut keeps its Threat.
+    @Test func lookalikeShortcutsAreStillThreats() async throws {
+        let dir = try TempDir()
+        let bundleID = "com.google.Chrome.app.agimnkijcaahngcdmfeangaknmldooml"
+        let impersonation = "Claims to be Google software but isn't signed by Google"
+
+        // A second program next to the loader.
+        let extra = try makeShortcut(in: dir, name: "Extra", bundleID: bundleID, sign: false)
+        try FileManager.default.copyItem(atPath: "/usr/bin/true", toPath: extra.appendingPathComponent("Contents/MacOS/payload").path)
+        try shell(codesign, ["--force", "--deep", "--sign", "-", extra.path])
+        #expect(try await engine.checkBundle(extra, context: .test).contains { $0.severity == .threat && $0.reason == impersonation })
+
+        // Changed after it was signed.
+        let tampered = try makeShortcut(in: dir, name: "Tampered", bundleID: bundleID)
+        try "added".write(to: tampered.appendingPathComponent("Contents/Resources/extra.txt"), createDirs: true)
+        let tamperedFindings = try await engine.checkBundle(tampered, context: .test)
+        #expect(tamperedFindings.contains { $0.severity == .threat && $0.reason == impersonation })
+        #expect(!tamperedFindings.contains { $0.severity == .clean })
+
+        // Not signed at all.
+        let unsigned = try makeShortcut(in: dir, name: "Unsigned", bundleID: bundleID, sign: false)
+        try shell(codesign, ["--remove-signature", unsigned.appendingPathComponent("Contents/MacOS/app_mode_loader").path])
+        #expect(try await engine.checkBundle(unsigned, context: .test).contains { $0.severity == .threat && $0.reason == impersonation })
+
+        // The main Chrome ID, not a web-app ID.
+        let fake = try makeShortcut(in: dir, name: "Fake", bundleID: "com.google.Chrome")
+        #expect(try await engine.checkBundle(fake, context: .test).contains { $0.severity == .threat && $0.reason == impersonation })
+    }
+
     @Test func tamperedBundleFailsVerification() async throws {
         let dir = try TempDir()
         let app = try dir.makeApp("Tampered")

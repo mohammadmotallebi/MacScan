@@ -151,6 +151,12 @@ add Team IDs you've verified with `codesign -dv /Applications/<App>.app`.
 Homebrew and MacPorts binaries are ad-hoc signed by design, so ad-hoc signing under `/opt/homebrew`,
 `/usr/local/Cellar` and `/opt/local` isn't flagged. Self-signed binaries there still are.
 
+Websites installed as apps from Chrome, Edge or Brave ("Chrome Apps" in `~/Applications`) are launchers
+the browser builds and ad-hoc signs on your Mac. They use the browser's bundle ID without its Team ID by
+design, so they get one Clean row ("Chrome web-app shortcut") instead of an impersonation Threat. A
+launcher only counts when its bundle ID has the web-app form, it is ad-hoc signed, its seal is intact
+and its only program is the browser's `app_mode_loader`. Anything else is judged like any other app.
+
 ### Full Check
 
 **Full Check** (⇧⌘F) is one scan of everything MacScan can check without you choosing a folder:

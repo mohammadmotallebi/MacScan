@@ -143,6 +143,16 @@ public struct AppIntegrityEngine: ScanEngine {
             notes.append("Homebrew/MacPorts build: package-manager builds are ad-hoc signed by design, so Gatekeeper and strict verification don't apply.")
             return [Finding(path: path, severity: .clean, engine: .integrity, reason: "Package-manager build (ad-hoc signed by design)", detail: notes.joined(separator: "\n"), unitPath: path)]
         }
+        if let browser = WebAppShortcut.browser(ofApp: url, status: signing) {
+            // A website installed as an app. Only a shortcut whose seal is intact is waved through;
+            // a modified one falls through and is judged like any other app.
+            let r = try await ProcessRunner.run(codesignURL, ["--verify", "--deep", "--strict", path])
+            if r.exitCode == 0 {
+                if let bundleID = Bundle(url: url)?.bundleIdentifier { notes.append("Bundle ID: \(bundleID)") }
+                notes.append("\(browser) creates this launcher when a website is installed as an app, and signs it ad-hoc on this Mac. It contains only \(browser)'s loader (\(WebAppShortcut.loaderName)), so Gatekeeper and publisher checks don't apply.")
+                return [Finding(path: path, severity: .clean, engine: .integrity, reason: "\(browser) web-app shortcut (signed on this Mac by \(browser))", detail: notes.joined(separator: "\n"), unitPath: path)]
+            }
+        }
         switch signing {
         case .unsigned:
             problems.append((.warning, "App is not code signed", "Unsigned apps cannot be verified and are blocked by Gatekeeper by default."))

@@ -233,7 +233,9 @@ public struct ProcessScanner: Sendable {
         if case .adhoc = status, PersistenceScanner.isPackageManagerPath(path) {
             notes.append("Homebrew/MacPorts build: package-manager builds are ad-hoc signed by design.")
         }
-        if let impersonation = AppIntegrityEngine.impersonationProblem(bundleID: status.identifier, status: status) {
+        if let browser = WebAppShortcut.browser(ofProgram: path, status: status) {
+            notes.append("\(browser) web-app shortcut: \(browser) creates and ad-hoc signs this launcher on this Mac when a website is installed as an app.")
+        } else if let impersonation = AppIntegrityEngine.impersonationProblem(bundleID: status.identifier, status: status) {
             problems.append((impersonation.0, impersonation.1))
             notes.append(impersonation.2)
         }

@@ -194,3 +194,53 @@ public struct GatekeeperAssessment: Equatable, Sendable {
         return GatekeeperAssessment(accepted: exitCode == 0, source: source, message: message)
     }
 }
+
+/// The small launcher apps Chromium browsers create when a website is installed as an app
+/// ("Chrome Apps" in ~/Applications). The browser builds and ad-hoc signs them on this Mac, so they carry
+/// the browser's bundle-ID prefix without the publisher's Team ID. That is by design, not impersonation.
+public enum WebAppShortcut {
+    /// Bundle-ID prefix (followed by the 32-letter extension ID) and the browser that creates it.
+    static let browsers: [(prefix: String, name: String)] = [
+        ("com.google.Chrome.app.", "Chrome"),
+        ("com.google.Chrome.beta.app.", "Chrome Beta"),
+        ("com.google.Chrome.dev.app.", "Chrome Dev"),
+        ("com.google.Chrome.canary.app.", "Chrome Canary"),
+        ("com.microsoft.edgemac.app.", "Edge"),
+        ("com.brave.Browser.app.", "Brave"),
+    ]
+
+    static let loaderName = "app_mode_loader"
+
+    /// The browser a bundle ID of this shape belongs to. The ID alone proves nothing; see `browser(ofApp:status:)`.
+    public static func browser(forBundleID bundleID: String) -> String? {
+        for (prefix, name) in browsers where bundleID.hasPrefix(prefix) {
+            let id = bundleID.dropFirst(prefix.count)
+            // Chromium extension IDs: 32 letters from a to p.
+            if id.count == 32, id.allSatisfy({ ("a"..."p").contains($0) }) { return name }
+        }
+        return nil
+    }
+
+    /// The browser that created this app, if it has exactly the shape of a web-app shortcut: the bundle ID,
+    /// an ad-hoc signature, and the browser's loader as its only program. Anything else (self-signed,
+    /// unsigned, a different or additional executable) is not a shortcut and is judged like any other app.
+    public static func browser(ofApp app: URL, status: SigningStatus) -> String? {
+        guard case .adhoc = status,
+              let info = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")),
+              let bundleID = info["CFBundleIdentifier"] as? String,
+              let browser = browser(forBundleID: bundleID),
+              info["CFBundleExecutable"] as? String == loaderName,
+              (try? FileManager.default.contentsOfDirectory(atPath: app.appendingPathComponent("Contents/MacOS").path)) == [loaderName]
+        else { return nil }
+        return browser
+    }
+
+    /// Same test for a running program: it must be the loader inside such an app.
+    public static func browser(ofProgram path: String, status: SigningStatus) -> String? {
+        guard (path as NSString).lastPathComponent == loaderName,
+              let app = PersistenceScanner.enclosingApp(of: path),
+              path == app.appendingPathComponent("Contents/MacOS/\(loaderName)").path
+        else { return nil }
+        return browser(ofApp: app, status: CodeSigning.status(of: app))
+    }
+}
