@@ -78,6 +78,8 @@ public struct Finding: Codable, Hashable, Identifiable, Sendable {
     public var change: FindingChange?
     /// Identity used for change tracking when it differs from `unitPath` (browser extensions).
     public var trackingKey: String?
+    /// The part of the Mac this result belongs to (nil in history saved before areas existed).
+    public var area: ScanArea?
 
     public init(
         id: UUID = UUID(),
@@ -217,6 +219,8 @@ public struct ScanSession: Codable, Hashable, Identifiable, Sendable {
     /// The same pair for a Browser Extensions scan.
     public var extensionSnapshot: [String: BrowserExtensionState]?
     public var extensionChanges: StartupChangeSummary?
+    /// Set when this scan was a Full Check.
+    public var fullCheck: FullCheckInfo?
 
     public init(
         id: UUID = UUID(),

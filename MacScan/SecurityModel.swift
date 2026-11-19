@@ -16,15 +16,20 @@ final class SecurityModel {
 
     func refresh() {
         guard !isChecking else { return }
+        Task { await run() }
+    }
+
+    /// Reads every setting, updates the section and returns the result (a Full Check stores a summary of it).
+    @discardableResult
+    func run() async -> [PostureCheck] {
         isChecking = true
-        Task {
-            let result = await SecurityPosture().check()
-            self.checks = result
-            self.lastChecked = Date()
-            self.isChecking = false
-            let problems = result.filter { $0.status != .pass }.map { "\($0.id.rawValue)=\($0.status.rawValue)" }
-            FileLogger.shared.info("Security check: \(result.count) checks, not passing: \(problems.isEmpty ? "none" : problems.joined(separator: ", "))")
-        }
+        let result = await SecurityPosture().check()
+        checks = result
+        lastChecked = Date()
+        isChecking = false
+        let problems = result.filter { $0.status != .pass }.map { "\($0.id.rawValue)=\($0.status.rawValue)" }
+        FileLogger.shared.info("Security check: \(result.count) checks, not passing: \(problems.isEmpty ? "none" : problems.joined(separator: ", "))")
+        return result
     }
 
     func openSettings(for check: PostureCheck) {

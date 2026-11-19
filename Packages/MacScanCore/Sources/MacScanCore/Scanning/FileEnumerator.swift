@@ -20,6 +20,9 @@ public struct EnumerationResult: Sendable {
     public var processExecutables: Set<String> = []
     /// Notes for the session (for example how many system processes were not listed).
     public var notes: [String] = []
+    /// Which target first claimed each unit. A unit walked by Applications stays an Applications unit
+    /// even if a later target (startup items, running processes) points into it.
+    public var unitAreas: [String: ScanArea] = [:]
 
     public var fileCount: Int { items.lazy.filter { $0.kind == .file }.count }
     public var bundleCount: Int { items.lazy.filter { $0.kind == .appBundle }.count }
@@ -62,6 +65,7 @@ public struct FileEnumerator: Sendable {
     public func enumerate(_ targets: [ScanTarget]) throws -> EnumerationResult {
         var walker = Walker(settings: settings)
         for target in targets {
+            walker.area = target.area
             switch target {
             case .applications:
                 for folder in Self.applicationFolders where FileManager.default.fileExists(atPath: folder.path) {
@@ -119,6 +123,8 @@ public struct FileEnumerator: Sendable {
         var result = EnumerationResult()
         var seen = Set<String>()
         var counter = 0
+        /// The area of the target being walked.
+        var area = ScanArea.files
 
         static let keys: [URLResourceKey] = [
             .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey, .isExecutableKey,
@@ -239,6 +245,7 @@ public struct FileEnumerator: Sendable {
         mutating func addBundle(_ url: URL) {
             guard seen.insert("bundle:" + url.path).inserted else { return }
             result.items.append(ScanItem(url: url, kind: .appBundle, bundleURL: url))
+            claim(url.path)
         }
 
         mutating func addFile(_ url: URL, values: URLResourceValues?, bundle: URL?, applicationsMode: Bool) {
@@ -275,6 +282,11 @@ public struct FileEnumerator: Sendable {
 
             seen.insert(path)
             result.items.append(ScanItem(url: url, kind: .file, size: size, isMachO: isMachO, bundleURL: bundle))
+            claim(bundle?.path ?? path)
+        }
+
+        private mutating func claim(_ unit: String) {
+            if result.unitAreas[unit] == nil { result.unitAreas[unit] = area }
         }
 
         mutating func recordIssue(path: String, error: Error) {

@@ -38,7 +38,7 @@ struct HistoryView: View {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(session.startedAt.formatted(date: .complete, time: .shortened)).font(.headline)
-                                Text(session.targets.joined(separator: ", "))
+                                Text(session.title)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -108,7 +108,7 @@ struct HistoryRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.callout.weight(.medium))
-                Text(session.targets.joined(separator: ", "))
+                Text(session.title)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)

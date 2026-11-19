@@ -35,6 +35,10 @@ struct MacScanApp: App {
         .commands {
             CommandGroup(replacing: .newItem) {}
             CommandMenu("Scan") {
+                Button("Full Check") { state.scanFullCheck() }
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                    .disabled(state.isScanning)
+                Divider()
                 Button("Scan Applications") { state.scanApplications() }
                     .keyboardShortcut("r", modifiers: [.command])
                     .disabled(state.isScanning)

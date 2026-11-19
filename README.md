@@ -151,6 +151,21 @@ add Team IDs you've verified with `codesign -dv /Applications/<App>.app`.
 Homebrew and MacPorts binaries are ad-hoc signed by design, so ad-hoc signing under `/opt/homebrew`,
 `/usr/local/Cellar` and `/opt/local` isn't flagged. Self-signed binaries there still are.
 
+### Full Check
+
+**Full Check** (⇧⌘F) is one scan of everything MacScan can check without you choosing a folder:
+Applications, Startup Items, Running Processes and Browser Extensions. It also reads the macOS
+security settings (see Security check). Your saved folders are not part of it; use **Scan Folders**.
+
+The result is a single list and a single History entry named "Full Check". Above the list there is
+one tile per area with its threats and warnings, plus a Security Settings tile ("12 of 13 pass").
+Click an area tile to show only that area's results; click it again to show everything. The Security
+Settings tile opens the Security section.
+
+An app that is also running or set to start at login is listed once under Applications; the running
+program and the startup item keep their own rows in their areas. A Full Check takes as long as the
+Applications scan (a few minutes with ClamAV and YARA on).
+
 ### Startup Items scan
 
 **Scan Startup Items** (⇧⌘L) lists and checks:

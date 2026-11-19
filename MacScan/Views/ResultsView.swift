@@ -8,20 +8,28 @@ struct ResultsView: View {
     @State private var filter: SeverityFilter = .all
     @State private var search = ""
     @State private var changedOnly = false
+    /// Set by clicking an area tile of a Full Check.
+    @State private var areaFilter: ScanArea?
     @State private var selection: Set<Finding.ID> = []
     @State private var sortOrder = [KeyPathComparator(\Finding.severity, order: .reverse)]
 
     private var filtered: [Finding] {
         let query = search.trimmingCharacters(in: .whitespaces)
-        return session.findings
+        return scoped
             .filter { filter.matches($0.severity) }
             .filter { !changedOnly || !hasChanges || $0.change != nil }
             .filter { query.isEmpty || $0.path.localizedCaseInsensitiveContains(query) || $0.reason.localizedCaseInsensitiveContains(query) }
             .sorted(using: sortOrder)
     }
 
+    /// The results of the chosen area, or all of them.
+    private var scoped: [Finding] {
+        guard let areaFilter else { return session.findings }
+        return session.findings.filter { $0.area == areaFilter }
+    }
+
     /// Startup items that are new or changed since the previous Startup Items scan.
-    private var hasChanges: Bool { session.findings.contains { $0.change != nil } }
+    private var hasChanges: Bool { scoped.contains { $0.change != nil } }
 
     private var selectedFinding: Finding? {
         guard selection.count == 1, let id = selection.first else { return nil }
@@ -30,6 +38,10 @@ struct ResultsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if let info = session.fullCheck {
+                FullCheckSummaryView(session: session, info: info, areaFilter: $areaFilter)
+                Divider()
+            }
             HStack {
                 Picker("Show", selection: $filter) {
                     ForEach(SeverityFilter.allCases) { f in
@@ -40,7 +52,7 @@ struct ResultsView: View {
                 .labelsHidden()
                 .frame(maxWidth: 420)
                 if hasChanges {
-                    Toggle("New or changed (\(session.findings.filter { $0.change != nil }.count))", isOn: $changedOnly)
+                    Toggle("New or changed (\(scoped.filter { $0.change != nil }.count))", isOn: $changedOnly)
                         .toggleStyle(.checkbox)
                         .help("Show only startup items or browser extensions that were added or changed since the previous scan of that kind")
                 }
@@ -110,10 +122,113 @@ struct ResultsView: View {
 
     private func label(for f: SeverityFilter) -> String {
         switch f {
-        case .all: "All (\(session.findings.count))"
-        case .threat: "Threats (\(session.count(.threat)))"
-        case .warning: "Warnings (\(session.count(.warning)))"
-        case .clean: "Clean (\(session.count(.clean)))"
+        case .all: "All (\(scoped.count))"
+        case .threat: "Threats (\(count(.threat)))"
+        case .warning: "Warnings (\(count(.warning)))"
+        case .clean: "Clean (\(count(.clean)))"
+        }
+    }
+
+    private func count(_ severity: Severity) -> Int {
+        scoped.lazy.filter { $0.severity == severity }.count
+    }
+}
+
+/// One tile per area of a Full Check, plus the macOS security settings. Clicking an area shows only its results.
+struct FullCheckSummaryView: View {
+    @Environment(AppState.self) private var state
+    let session: ScanSession
+    let info: FullCheckInfo
+    @Binding var areaFilter: ScanArea?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(FullCheck.areas) { area in
+                let summary = session.summary(of: area)
+                Button {
+                    areaFilter = areaFilter == area ? nil : area
+                } label: {
+                    FullCheckTile(
+                        title: area.title, symbol: area.symbol,
+                        color: summary.isEmpty ? .secondary : summary.worst.color,
+                        line: Self.line(for: summary),
+                        isSelected: areaFilter == area)
+                }
+                .buttonStyle(.plain)
+                .help(areaFilter == area ? "Show all results" : "Show only \(area.title) results")
+            }
+            Button {
+                state.selectedSection = .security
+            } label: {
+                FullCheckTile(
+                    title: "Security Settings", symbol: "lock.shield",
+                    color: securityColor, line: securityLine, isSelected: false)
+            }
+            .buttonStyle(.plain)
+            .help(securityHelp)
+        }
+        .padding(8)
+    }
+
+    static func line(for summary: AreaSummary) -> String {
+        if summary.isEmpty { return "Nothing found to check" }
+        var parts: [String] = []
+        if summary.threats > 0 { parts.append("\(summary.threats) threat\(summary.threats == 1 ? "" : "s")") }
+        if summary.warnings > 0 { parts.append("\(summary.warnings) warning\(summary.warnings == 1 ? "" : "s")") }
+        return parts.isEmpty ? "No issues · \(summary.clean.formatted()) checked" : parts.joined(separator: " · ")
+    }
+
+    private var securityColor: Color {
+        guard let security = info.security else { return .secondary }
+        return security.problems.isEmpty ? .green : .orange
+    }
+
+    private var securityLine: String {
+        guard let security = info.security else { return "Not checked" }
+        return "\(security.passed) of \(security.total) pass"
+    }
+
+    private var securityHelp: String {
+        guard let security = info.security else { return "The security settings could not be read. Open the Security section to check them." }
+        let found = security.problems.isEmpty ? "Everything passed when this check ran." : "Not passing when this check ran: \(security.problems.joined(separator: ", "))."
+        return found + " Open the Security section for the current state."
+    }
+}
+
+struct FullCheckTile: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    let line: String
+    let isSelected: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: symbol)
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+            Text(line)
+                .font(.caption)
+                .foregroundStyle(color)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(isSelected ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), lineWidth: 1))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+extension ScanArea {
+    var symbol: String {
+        switch self {
+        case .applications: "app.badge.checkmark"
+        case .startupItems: "power.circle"
+        case .runningProcesses: "cpu"
+        case .browserExtensions: "puzzlepiece.extension"
+        case .files: "folder"
         }
     }
 }

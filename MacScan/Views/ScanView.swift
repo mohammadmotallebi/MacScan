@@ -24,7 +24,7 @@ struct ScanView: View {
                     ContentUnavailableView {
                         Label("Ready to scan", systemImage: "checkmark.shield")
                     } description: {
-                        Text("Scan your applications, your saved folders, or drop any file or folder onto this window.\nMacScan only runs while this window is open.")
+                        Text("Run a Full Check, scan one area or your saved folders, or drop any file or folder onto this window.\nMacScan only runs while this window is open.")
                     }
                 } else {
                     Spacer()
@@ -48,12 +48,23 @@ struct ScanControlsPanel: View {
                 GroupBox {
                     VStack(spacing: 8) {
                         Button {
+                            state.scanFullCheck()
+                        } label: {
+                            Label("Full Check", systemImage: "checkmark.shield")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .help("Applications, startup items, running processes and browser extensions in one scan, plus the macOS security settings. Your saved folders are not included.")
+
+                        Divider().padding(.vertical, 2)
+
+                        Button {
                             state.scanApplications()
                         } label: {
                             Label("Scan Applications", systemImage: "app.badge.checkmark")
                                 .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
                         .controlSize(.large)
 
                         Button {

@@ -74,3 +74,27 @@ func realProcessProbe() async throws {
     for f in session.findings where f.severity == .clean && f.engine == .processes { out += "\(f.reason) | \(f.path)\n" }
     try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_PROCESS_PROBE"]!, atomically: true, encoding: .utf8)
 }
+
+// Opt-in, read-only: a Full Check of this Mac without ClamAV and YARA (per-area counts):
+//   MACSCAN_FULLCHECK_PROBE=/tmp/macscan-fullcheck.txt swift test --filter realFullCheckProbe
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_FULLCHECK_PROBE"] != nil))
+func realFullCheckProbe() async throws {
+    var settings = ScanSettings()
+    settings.enableClamAV = false
+    settings.enableYara = false
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+    let start = ContinuousClock.now
+    var session = await ScanCoordinator(engines: EngineFactory.makeEngines(settings: settings), settings: settings, logger: logger)
+        .run(targets: FullCheck.targets) { _ in }
+    session.fullCheck = FullCheckInfo(checks: await SecurityPosture().check())
+    var out = "\(session.title): \(ContinuousClock.now - start), status \(session.status.rawValue), items \(session.itemsScanned)/\(session.itemsTotal)\n"
+    for area in FullCheck.areas {
+        let s = session.summary(of: area)
+        out += "\(area.title): threats \(s.threats) warnings \(s.warnings) clean \(s.clean)\n"
+    }
+    out += "no area: \(session.findings.filter { $0.area == nil }.count)\n"
+    out += "security: \(String(describing: session.fullCheck?.security))\n"
+    for f in session.findings where f.severity > .clean { out += "\(f.area?.title ?? "-") | \(f.severity) | \(f.engine.title) | \(f.reason) | \(f.path)\n" }
+    for f in session.findings where f.area == nil { out += "NO AREA | \(f.engine.title) | \(f.path) | unit \(f.unitPath)\n" }
+    try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_FULLCHECK_PROBE"]!, atomically: true, encoding: .utf8)
+}

@@ -172,6 +172,19 @@ public struct ScanCoordinator: Sendable {
         findings = kept
         session.ignoredCount = ignored
 
+        // Which part of the Mac each result belongs to (for the per-area summary of a Full Check).
+        let targetAreas = Set(targets.map(\.area))
+        let onlyArea = targetAreas.count == 1 ? targetAreas.first : nil
+        func area(of finding: Finding) -> ScanArea? {
+            switch finding.engine {
+            case .persistence: .startupItems
+            case .processes: .runningProcesses
+            case .extensions: .browserExtensions
+            default: enumeration.unitAreas[finding.unitPath] ?? enumeration.unitAreas[finding.path] ?? onlyArea
+            }
+        }
+        for i in findings.indices { findings[i].area = area(of: findings[i]) }
+
         // 5. Optional VirusTotal lookups for flagged items.
         if !cancelled, settings.vtAutoLookupFlagged, let lookupEngine {
             findings += await lookUpFlagged(findings, engine: lookupEngine, session: &session, onProgress: onProgress)
@@ -181,10 +194,18 @@ public struct ScanCoordinator: Sendable {
         }
 
         // 6. One "clean" row per fully scanned unit (file or app) that has no findings at all.
-        let unitsWithFindings = Set(findings.map(\.unitPath)).union(enumeration.coveredUnits)
+        // A unit an inventory already describes gets no generic row, unless Applications or a chosen folder
+        // scanned it in full: then "No issues found" is true of the whole app, not of one program in it.
+        let covered = enumeration.coveredUnits.filter {
+            let area = enumeration.unitAreas[$0]
+            return area != .applications && area != .files
+        }
+        let unitsWithFindings = Set(findings.map(\.unitPath)).union(covered)
         let engineNames = active.map(\.displayName).joined(separator: ", ")
         for unit in completedUnits.sorted() where !unitsWithFindings.contains(unit) {
-            findings.append(Finding(path: unit, severity: .clean, engine: .scanner, reason: "No issues found", detail: "Checked by: \(engineNames)", unitPath: unit))
+            var clean = Finding(path: unit, severity: .clean, engine: .scanner, reason: "No issues found", detail: "Checked by: \(engineNames)", unitPath: unit)
+            clean.area = area(of: clean)
+            findings.append(clean)
         }
 
         findings.sort(by: Self.displayOrder)
@@ -244,7 +265,9 @@ public struct ScanCoordinator: Sendable {
             if Task.isCancelled { break }
             onProgress(ScanProgress(phase: .lookingUp, itemsDone: index, itemsTotal: flaggedPaths.count, currentFile: path))
             do {
-                results.append(try await engine.lookup(path: path, unitPath: unit))
+                var result = try await engine.lookup(path: path, unitPath: unit)
+                result.area = findings.first { $0.path == path }?.area
+                results.append(result)
             } catch is CancellationError {
                 break
             } catch {

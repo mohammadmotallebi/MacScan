@@ -282,6 +282,14 @@ final class AppState {
 
     // MARK: - Scanning
 
+    /// Applications, startup items, running processes and browser extensions in one scan, plus the
+    /// macOS security settings (which are read as the user, never by the root worker).
+    func scanFullCheck() {
+        guard !isScanning else { return }
+        let security = security
+        startScan(FullCheck.targets, securityCheck: Task { await security.run() })
+    }
+
     func scanApplications() {
         startScan([.applications])
     }
@@ -318,8 +326,9 @@ final class AppState {
         scan(urls: panel.urls)
     }
 
-    func startScan(_ targets: [ScanTarget]) {
-        guard !isScanning, !targets.isEmpty else { return }
+    /// `securityCheck` marks the scan as a Full Check; its result is stored in the session.
+    func startScan(_ targets: [ScanTarget], securityCheck: Task<[PostureCheck], Never>? = nil) {
+        guard !isScanning, !targets.isEmpty else { securityCheck?.cancel(); return }
         selectedSection = .scan
         isScanning = true
         progress = ScanProgress(phase: .enumerating)
@@ -350,7 +359,9 @@ final class AppState {
                 do {
                     let session = try await ElevatedScanLauncher(executable: executable).run(request, onProgress: onProgress)
                     // VirusTotal runs here, as the user: the root worker never sees the API key.
-                    self.scanFinished(await coordinator.lookUpFlagged(in: session, onProgress: onProgress))
+                    var finished = await coordinator.lookUpFlagged(in: session, onProgress: onProgress)
+                    if let securityCheck { finished.fullCheck = FullCheckInfo(checks: await securityCheck.value) }
+                    self.scanFinished(finished)
                 } catch {
                     self.logger.warning("Administrator scan did not run: \(error.localizedDescription)")
                     self.isScanning = false
@@ -365,7 +376,8 @@ final class AppState {
         }
 
         scanTask = Task {
-            let session = await coordinator.run(targets: targets, onProgress: onProgress)
+            var session = await coordinator.run(targets: targets, onProgress: onProgress)
+            if let securityCheck { session.fullCheck = FullCheckInfo(checks: await securityCheck.value) }
             self.scanFinished(session)
         }
     }
