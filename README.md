@@ -170,6 +170,14 @@ one tile per area with its threats and warnings, plus a Security Settings tile (
 Privacy tile ("2 worth a look · 3 leftovers"). Click an area tile to show only that area's results;
 click it again to show everything. The Security Settings and Privacy tiles open their sections.
 
+Under the tiles, **Since the last Full Check** lists what is different from the previous completed one:
+new apps, apps that gained a sensitive permission (Screen Recording, Accessibility, Full Disk Access, Input
+Monitoring, camera, microphone, Automation, App Management, Developer Tools), security or tampering checks
+that got worse or whose finding changed (a new proxy, DNS server, certificate…), and checks that are fixed
+now. The first Full Check only saves a starting point. A cancelled check is not compared and not saved, and
+permissions are only compared when they could be read. The starting point is kept in
+`fullcheck-baseline.json` in MacScan's folder.
+
 An app that is also running or set to start at login is listed once under Applications; the running
 program and the startup item keep their own rows in their areas. A Full Check takes as long as the
 Applications scan (a few minutes with ClamAV and YARA on).

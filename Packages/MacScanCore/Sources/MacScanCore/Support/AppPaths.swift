@@ -61,6 +61,11 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("extensions-baseline.json")
     }
 
+    /// What the last completed Full Check found (to report what changed since).
+    public static var fullCheckBaselineFile: URL {
+        applicationSupport.appendingPathComponent("fullcheck-baseline.json")
+    }
+
     /// Held while a background scan runs, so the scheduled scan and the Downloads watcher take turns.
     public static var backgroundLockFile: URL {
         applicationSupport.appendingPathComponent("background.lock")

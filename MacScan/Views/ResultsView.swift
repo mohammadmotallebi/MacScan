@@ -40,6 +40,7 @@ struct ResultsView: View {
         VStack(spacing: 0) {
             if let info = session.fullCheck {
                 FullCheckSummaryView(session: session, info: info, areaFilter: $areaFilter)
+                FullCheckChangesView(info: info)
                 Divider()
             }
             HStack {
@@ -227,6 +228,103 @@ struct FullCheckSummaryView: View {
         guard let security = info.security else { return "The security settings could not be read. Open the Security section to check them." }
         let found = security.problems.isEmpty ? "Everything passed when this check ran." : "Not passing when this check ran: \(security.problems.joined(separator: ", "))."
         return found + " Open the Security section for the current state."
+    }
+}
+
+/// "Since last Full Check": what is new or different from the previous one.
+struct FullCheckChangesView: View {
+    @Environment(AppState.self) private var state
+    let info: FullCheckInfo
+    @State private var expanded = true
+
+    var body: some View {
+        Group {
+            if let changes = info.changes, let date = info.comparedWith {
+                if changes.isEmpty {
+                    Label("Nothing changed since the last Full Check (\(date.formatted(date: .abbreviated, time: .shortened))).",
+                          systemImage: "checkmark.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    DisclosureGroup(isExpanded: $expanded) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(changes) { change in
+                                row(change)
+                            }
+                        }
+                        .padding(.top, 4)
+                    } label: {
+                        let attention = changes.filter(\.needsAttention).count
+                        Label("\(changes.count) change\(changes.count == 1 ? "" : "s") since the last Full Check (\(date.formatted(date: .abbreviated, time: .shortened)))",
+                              systemImage: attention > 0 ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(attention > 0 ? .orange : .green)
+                    }
+                }
+            } else if info.tracked == true {
+                Label("First Full Check. Next time MacScan shows what changed since this one.", systemImage: "flag")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private func row(_ change: FullCheckChange) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: change.kind.symbol)
+                .foregroundStyle(change.kind.color)
+                .frame(width: 16)
+            Text(change.kind.label).font(.caption.weight(.semibold)).foregroundStyle(change.kind.color)
+                .frame(width: 92, alignment: .leading)
+            Text(change.title).font(.callout.weight(.medium))
+            Text(change.detail).font(.callout).foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            switch change.kind {
+            case .newPermission:
+                Button("Privacy") { state.selectedSection = .privacy }.controlSize(.small)
+            case .settingChanged, .settingFixed:
+                Button("Security") { state.selectedSection = .security }.controlSize(.small)
+            case .newApp:
+                if let path = change.path {
+                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }.controlSize(.small)
+                }
+            }
+        }
+    }
+}
+
+extension FullCheckChange.Kind {
+    var label: String {
+        switch self {
+        case .newApp: "New app"
+        case .newPermission: "New permission"
+        case .settingChanged: "Setting changed"
+        case .settingFixed: "Fixed"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .newApp: "app.badge"
+        case .newPermission: "hand.raised.fill"
+        case .settingChanged: "exclamationmark.triangle.fill"
+        case .settingFixed: "checkmark.circle.fill"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .newApp: .blue
+        case .newPermission, .settingChanged: .orange
+        case .settingFixed: .green
+        }
     }
 }
 

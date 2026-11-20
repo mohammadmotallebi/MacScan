@@ -15,6 +15,21 @@ enum AppSection: Hashable {
     case quarantine
 }
 
+/// What a Full Check reads besides the scan: the security settings and privacy permissions.
+struct FullCheckExtras: Sendable {
+    var checks: [PostureCheck]
+    var privacy: PrivacyReport
+
+    /// Marks the session as a Full Check, stores the summaries, and compares it with the previous one.
+    func attach(to session: inout ScanSession) {
+        session.fullCheck = FullCheckInfo(security: FullCheckInfo(checks: checks).security, privacy: PrivacySummary(report: privacy))
+        FullCheckChangeTracker().apply(to: &session, checks: checks, privacy: privacy)
+        if let changes = session.fullCheck?.changes {
+            FileLogger.shared.info("Full Check changes: \(changes.count) (" + Dictionary(grouping: changes, by: \.kind).map { "\($0.key.rawValue)=\($0.value.count)" }.sorted().joined(separator: ", ") + ")")
+        }
+    }
+}
+
 enum SeverityFilter: String, CaseIterable, Identifiable {
     case all, threat, warning, clean
 
@@ -295,8 +310,7 @@ final class AppState {
         startScan(FullCheck.targets, fullCheck: Task {
             async let checks = security.run()
             async let report = privacy.run()
-            return FullCheckInfo(security: FullCheckInfo(checks: await checks).security,
-                                 privacy: PrivacySummary(report: await report))
+            return FullCheckExtras(checks: await checks, privacy: await report)
         })
     }
 
@@ -337,7 +351,7 @@ final class AppState {
     }
 
     /// `fullCheck` marks the scan as a Full Check; its result is stored in the session.
-    func startScan(_ targets: [ScanTarget], fullCheck: Task<FullCheckInfo, Never>? = nil) {
+    func startScan(_ targets: [ScanTarget], fullCheck: Task<FullCheckExtras, Never>? = nil) {
         guard !isScanning, !targets.isEmpty else { fullCheck?.cancel(); return }
         selectedSection = .scan
         isScanning = true
@@ -370,7 +384,7 @@ final class AppState {
                     let session = try await ElevatedScanLauncher(executable: executable).run(request, onProgress: onProgress)
                     // VirusTotal runs here, as the user: the root worker never sees the API key.
                     var finished = await coordinator.lookUpFlagged(in: session, onProgress: onProgress)
-                    if let fullCheck { finished.fullCheck = await fullCheck.value }
+                    if let fullCheck { (await fullCheck.value).attach(to: &finished) }
                     self.scanFinished(finished)
                 } catch {
                     self.logger.warning("Administrator scan did not run: \(error.localizedDescription)")
@@ -387,7 +401,7 @@ final class AppState {
 
         scanTask = Task {
             var session = await coordinator.run(targets: targets, onProgress: onProgress)
-            if let fullCheck { session.fullCheck = await fullCheck.value }
+            if let fullCheck { (await fullCheck.value).attach(to: &session) }
             self.scanFinished(session)
         }
     }

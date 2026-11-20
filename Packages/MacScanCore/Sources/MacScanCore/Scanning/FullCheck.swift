@@ -115,6 +115,12 @@ public struct FullCheckInfo: Codable, Hashable, Sendable {
     public var security: PostureSummary?
     /// Nil in Full Checks from before privacy was part of them.
     public var privacy: PrivacySummary?
+    /// When the Full Check this one was compared with ran. Nil for the first one (nothing to compare with).
+    public var comparedWith: Date?
+    /// What changed since then. Nil when nothing was compared.
+    public var changes: [FullCheckChange]?
+    /// True once change tracking ran for this check (nil in Full Checks from before it existed).
+    public var tracked: Bool?
 
     public init(security: PostureSummary? = nil, privacy: PrivacySummary? = nil) {
         self.security = security
