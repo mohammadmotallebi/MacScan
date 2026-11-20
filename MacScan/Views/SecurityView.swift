@@ -31,11 +31,26 @@ struct SecurityView: View {
                 ContentUnavailableView {
                     Label("Security settings", systemImage: "lock.shield")
                 } description: {
-                    Text("Checks whether the protections built into macOS are turned on.\nMacScan only reads them; it never changes a setting.")
+                    Text("Checks whether the protections built into macOS are on, and looks for settings that adware changes.\nMacScan only reads them; it never changes a setting.")
                 }
             } else {
-                List(model.checks) { check in
-                    PostureRow(check: check) { model.openSettings(for: check) }
+                List {
+                    ForEach(PostureGroup.allCases) { group in
+                        let checks = model.checks.filter { $0.group == group }
+                        if !checks.isEmpty {
+                            Section {
+                                ForEach(checks) { check in
+                                    PostureRow(check: check) { model.openSettings(for: check) }
+                                }
+                            } header: {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(group.title).font(.headline).foregroundStyle(.primary)
+                                    Text(group.explanation).font(.callout).foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
                 }
                 .listStyle(.inset)
                 Divider()
@@ -101,6 +116,15 @@ private struct PostureRow: View {
         .padding(.vertical, 5)
         .contextMenu {
             if check.settingsURL != nil { Button("Open in System Settings", action: openSettings) }
+        }
+    }
+}
+
+extension PostureGroup {
+    var explanation: String {
+        switch self {
+        case .protections: "Whether the protections built into macOS are on."
+        case .tampering: "Settings adware and malware change to redirect or watch your traffic."
         }
     }
 }

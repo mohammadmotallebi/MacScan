@@ -8,7 +8,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **Signer checks**: flags **self-signed** apps and binaries (certificates Apple didn't issue, typical of cracked or repackaged software) and apps that **impersonate** a well-known publisher's bundle ID
 - **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
 - **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
-- **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on
+- **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on, and looks for signs of tampering (hosts file, DNS, proxy, profiles, trusted certificates, sudo rules)
 - **Privacy permissions**: shows which apps can use your camera, microphone, screen and files, and points out the ones worth a look
 - **Network**: shows which programs are talking to other computers right now and which accept connections, and points out untrusted ones
 - **Quarantine**: move a flagged item into a locked folder instead of the Trash, and restore it exactly where it was
@@ -267,6 +267,18 @@ a warning or a fail, with one line on what it means and how to fix it:
 | Password after sleep or screen saver | off, or a delay over 15 minutes |
 | Automatic login, Guest account | on |
 | Remote Login (SSH), Screen Sharing, File Sharing | on |
+
+A second group, **Signs of tampering**, looks for settings adware and malware change to redirect or watch
+your traffic:
+
+| Check | Not passing when |
+| --- | --- |
+| Hosts file | well-known sites (Apple, Google, banks, crypto exchanges…) are sent to another address (**Fail**), Apple's security servers are blocked, or other names point elsewhere. Names pointed at this Mac (blocking or local development) pass |
+| DNS servers | a server isn't local, your router, or a well-known service (Google, Cloudflare, Quad9, OpenDNS, AdGuard, NextDNS…) |
+| Web proxy | a web, secure web or SOCKS proxy, or an automatic proxy file, is set |
+| Configuration profiles | a profile is installed for your account (profiles for the whole Mac need an administrator to list) |
+| Trusted certificates | a root certificate was added and marked as trusted. Ones from development tools (mkcert, Laravel Valet, Herd…) pass with a note; debugging proxies (Charles, mitmproxy…) don't |
+| Extra administrator rules | files in `/etc/sudoers.d`. Ones from development tools (Herd, Valet…) pass with a note |
 
 MacScan only reads these settings with the system's own status tools and never changes one; **Open Settings**
 takes you to the right pane. It needs no administrator password. A setting that can't be read is shown as

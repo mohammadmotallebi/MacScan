@@ -11,6 +11,31 @@ public enum PostureStatus: String, Sendable, CaseIterable {
 public enum PostureCheckID: String, Sendable, CaseIterable {
     case sip, gatekeeper, fileVault, firewall, xprotect, updates, autoUpdates
     case screenLock, autoLogin, guestAccount, remoteLogin, screenSharing, fileSharing
+    case hostsFile, dnsServers, webProxy, profiles, trustedCertificates, sudoRules
+
+    public var group: PostureGroup {
+        switch self {
+        case .hostsFile, .dnsServers, .webProxy, .profiles, .trustedCertificates, .sudoRules: .tampering
+        default: .protections
+        }
+    }
+}
+
+/// How the Security section groups its rows.
+public enum PostureGroup: String, Sendable, CaseIterable, Identifiable {
+    /// macOS's built-in protections.
+    case protections
+    /// Settings that adware and malware change instead of dropping a file.
+    case tampering
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .protections: "macOS protections"
+        case .tampering: "Signs of tampering"
+        }
+    }
 }
 
 /// One of macOS's own protections and whether it is on.
@@ -24,6 +49,8 @@ public struct PostureCheck: Identifiable, Hashable, Sendable {
     public var advice: String?
     /// The System Settings pane where this is changed, if there is one.
     public var settingsURL: URL?
+
+    public var group: PostureGroup { id.group }
 
     public init(id: PostureCheckID, title: String, status: PostureStatus, summary: String, advice: String? = nil, settingsURL: URL? = nil) {
         self.id = id
@@ -51,14 +78,23 @@ public struct PostureCommandOutput: Sendable {
 public struct SecurityPosture: Sendable {
     public typealias Runner = @Sendable (_ tool: String, _ arguments: [String]) async -> PostureCommandOutput?
     public typealias PlistReader = @Sendable (_ path: String) -> [String: any Sendable]?
+    public typealias FileReader = @Sendable (_ path: String) -> String?
+    public typealias DirectoryLister = @Sendable (_ path: String) -> [String]?
 
     let run: Runner
     let readPlist: PlistReader
+    let readFile: FileReader
+    let listDirectory: DirectoryLister
     let now: Date
 
-    public init(run: @escaping Runner = SecurityPosture.systemRunner, readPlist: @escaping PlistReader = SecurityPosture.systemPlistReader, now: Date = Date()) {
+    public init(run: @escaping Runner = SecurityPosture.systemRunner, readPlist: @escaping PlistReader = SecurityPosture.systemPlistReader,
+                readFile: @escaping FileReader = { try? String(contentsOfFile: $0, encoding: .utf8) },
+                listDirectory: @escaping DirectoryLister = { try? FileManager.default.contentsOfDirectory(atPath: $0) },
+                now: Date = Date()) {
         self.run = run
         self.readPlist = readPlist
+        self.readFile = readFile
+        self.listDirectory = listDirectory
         self.now = now
     }
 
@@ -88,6 +124,8 @@ public struct SecurityPosture: Sendable {
         static let lockScreen = url("com.apple.Lock-Screen-Settings.extension")
         static let users = url("com.apple.Users-Groups-Settings.extension")
         static let sharing = url("com.apple.Sharing-Settings.extension")
+        static let network = url("com.apple.Network-Settings.extension")
+        static let profiles = url("com.apple.Profiles-Settings.extension")
     }
 
     /// Runs every check (concurrently) and returns them in display order.
@@ -101,6 +139,11 @@ public struct SecurityPosture: Sendable {
         async let screenLock = run("/usr/sbin/sysadminctl", ["-screenLock", "status"])
         async let guest = run("/usr/sbin/sysadminctl", ["-guestAccount", "status"])
         async let services = run("/bin/launchctl", ["print-disabled", "system"])
+        async let dns = run("/usr/sbin/scutil", ["--dns"])
+        async let proxy = run("/usr/sbin/scutil", ["--proxy"])
+        async let profiles = run("/usr/bin/profiles", ["list"])
+        async let userTrust = run("/usr/bin/security", ["dump-trust-settings"])
+        async let adminTrust = run("/usr/bin/security", ["dump-trust-settings", "-d"])
         let updatePrefs = readPlist("/Library/Preferences/com.apple.SoftwareUpdate.plist")
         let loginPrefs = readPlist("/Library/Preferences/com.apple.loginwindow.plist")
         let serviceList = await services
@@ -122,10 +165,16 @@ public struct SecurityPosture: Sendable {
                          risk: "Anyone on your network who knows a user's password can see and control this Mac's screen."),
             Self.sharing(.fileSharing, title: "File Sharing", label: "com.apple.smbd", serviceList,
                          risk: "Shared folders are reachable from other computers on your network."),
+            Self.hostsFile(readFile("/etc/hosts")),
+            Self.dnsServers(await dns),
+            Self.webProxy(await proxy),
+            Self.profiles(await profiles),
+            Self.trustedCertificates(user: await userTrust, admin: await adminTrust),
+            Self.sudoRules(listDirectory("/etc/sudoers.d")),
         ]
     }
 
-    private static func unknown(_ id: PostureCheckID, _ title: String, settings: URL? = nil) -> PostureCheck {
+    static func unknown(_ id: PostureCheckID, _ title: String, settings: URL? = nil) -> PostureCheck {
         PostureCheck(id: id, title: title, status: .unknown, summary: "MacScan couldn't read this setting.", settingsURL: settings)
     }
 
