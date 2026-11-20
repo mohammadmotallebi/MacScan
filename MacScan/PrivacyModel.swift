@@ -41,14 +41,19 @@ final class PrivacyModel {
 
     func refresh() {
         guard !isChecking else { return }
+        Task { await run() }
+    }
+
+    /// Reads the permissions, updates the section and returns the result (a Full Check stores a summary of it).
+    @discardableResult
+    func run() async -> PrivacyReport {
         isChecking = true
-        Task {
-            let result = await Task.detached { PrivacyAudit().run() }.value
-            report = result
-            lastChecked = Date()
-            isChecking = false
-            FileLogger.shared.info("Privacy check: \(result.grants.count) permissions, \(result.count(.warning)) warnings, \(result.count(.review)) to review, user list \(result.user), system list \(result.system)")
-        }
+        let result = await Task.detached { PrivacyAudit().run() }.value
+        report = result
+        lastChecked = Date()
+        isChecking = false
+        FileLogger.shared.info("Privacy check: \(result.grants.count) permissions, \(result.count(.warning)) warnings, \(result.count(.review)) to review, user list \(result.user), system list \(result.system)")
+        return result
     }
 
     func openSettings(for permission: PrivacyPermission) {

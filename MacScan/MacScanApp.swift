@@ -81,6 +81,12 @@ struct MacScanApp: App {
                 }
                 .keyboardShortcut("y", modifiers: [.command, .shift])
                 .disabled(state.privacy.isChecking)
+                Button("Check Network Activity") {
+                    state.selectedSection = .network
+                    state.network.refresh()
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(state.network.isChecking)
                 Divider()
                 Button("Cancel Scan") { state.cancelScan() }
                     .keyboardShortcut(".", modifiers: [.command])

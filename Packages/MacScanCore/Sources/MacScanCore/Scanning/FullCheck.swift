@@ -72,13 +72,53 @@ public struct PostureSummary: Codable, Hashable, Sendable {
     }
 }
 
+/// The privacy permissions as they were when a Full Check ran.
+public struct PrivacySummary: Codable, Hashable, Sendable {
+    /// Apps allowed at least one permission.
+    public var apps: Int
+    public var warnings: Int
+    /// Rows worth a look (leftovers included).
+    public var review: Int
+    /// Permissions of apps that are no longer installed.
+    public var leftovers: Int
+    /// False when nothing could be read (usually no Full Disk Access).
+    public var readable: Bool
+    /// Only part of the list could be read.
+    public var partial: Bool
+
+    public init(apps: Int, warnings: Int, review: Int, leftovers: Int, readable: Bool = true, partial: Bool = false) {
+        self.apps = apps
+        self.warnings = warnings
+        self.review = review
+        self.leftovers = leftovers
+        self.readable = readable
+        self.partial = partial
+    }
+
+    public init(report: PrivacyReport) {
+        let unread: Set<PrivacyReport.Source> = [.noAccess, .missing]
+        let nothingRead = unread.contains(report.user) && unread.contains(report.system)
+            || (report.grants.isEmpty && report.needsFullDiskAccess)
+        self.init(
+            apps: Set(report.grants.filter { $0.decision != .denied }.map(\.client)).count,
+            warnings: report.count(.warning),
+            review: report.count(.review),
+            leftovers: report.grants.lazy.filter(\.canRemove).count,
+            readable: !nothingRead,
+            partial: !nothingRead && report.needsFullDiskAccess)
+    }
+}
+
 /// Marks a session as a Full Check and carries what isn't a finding.
 public struct FullCheckInfo: Codable, Hashable, Sendable {
     /// Nil when the security settings weren't read.
     public var security: PostureSummary?
+    /// Nil in Full Checks from before privacy was part of them.
+    public var privacy: PrivacySummary?
 
-    public init(security: PostureSummary? = nil) {
+    public init(security: PostureSummary? = nil, privacy: PrivacySummary? = nil) {
         self.security = security
+        self.privacy = privacy
     }
 
     /// No checks (the settings couldn't be read at all) leaves the summary out instead of showing "0 of 0".

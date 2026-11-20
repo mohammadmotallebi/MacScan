@@ -10,6 +10,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
 - **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on
 - **Privacy permissions**: shows which apps can use your camera, microphone, screen and files, and points out the ones worth a look
+- **Network**: shows which programs are talking to other computers right now and which accept connections, and points out untrusted ones
 - **Quarantine**: move a flagged item into a locked folder instead of the Trash, and restore it exactly where it was
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
@@ -162,12 +163,12 @@ and its only program is the browser's `app_mode_loader`. Anything else is judged
 
 **Full Check** (⇧⌘F) is one scan of everything MacScan can check without you choosing a folder:
 Applications, Startup Items, Running Processes and Browser Extensions. It also reads the macOS
-security settings (see Security check). Your saved folders are not part of it; use **Scan Folders**.
+security settings (see Security check) and the privacy permissions (see Privacy permissions). Your saved folders are not part of it; use **Scan Folders**.
 
 The result is a single list and a single History entry named "Full Check". Above the list there is
-one tile per area with its threats and warnings, plus a Security Settings tile ("12 of 13 pass").
-Click an area tile to show only that area's results; click it again to show everything. The Security
-Settings tile opens the Security section.
+one tile per area with its threats and warnings, plus a Security Settings tile ("12 of 13 pass") and a
+Privacy tile ("2 worth a look · 3 leftovers"). Click an area tile to show only that area's results;
+click it again to show everything. The Security Settings and Privacy tiles open their sections.
 
 An app that is also running or set to start at login is listed once under Applications; the running
 program and the startup item keep their own rows in their areas. A Full Check takes as long as the
@@ -294,6 +295,25 @@ deletes the stand-in again. Permissions of installed apps are never touched.
 MacScan needs Full Disk Access to read the list, because macOS keeps it private. It reads a private copy of
 macOS's two permission databases and never edits them; **Open Settings** takes you to the right
 page. Location Services is not listed (macOS keeps it in a file only root can read).
+
+### Network
+
+**Network** in the sidebar (⇧⌘N) is a snapshot of which programs have network connections open right now,
+taken with macOS's own `lsof`. One row per app (its helpers included) or program, with where it connects
+(this Mac, the local network or the internet) and which ports it listens on. Click the arrow for the
+addresses and ports.
+
+| Mark | When |
+| --- | --- |
+| **Warning** | an unsigned, ad-hoc signed or self-signed program talks to other computers or accepts connections from them (more so from Downloads, a temporary or a hidden folder) |
+| Worth a look | a TCP port is open to other computers, it connects to a port remote shells and backdoors often use (such as 4444 or 31337), its program file can't be found, or it was replaced while running |
+
+macOS's own programs are hidden unless something about them is worth a look (**Hide macOS**). Homebrew and
+MacPorts builds aren't marked for being ad-hoc signed. UDP ports open on all interfaces are listed but not
+marked; they are mostly local discovery such as Bonjour.
+
+MacScan never blocks or closes anything, and it doesn't look up host names, so the check never goes online.
+Without administrator rights only your own programs are visible.
 
 ### Quarantine
 
@@ -422,6 +442,7 @@ Packages/MacScanCore/         All scanning logic (Swift package, testable with `
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
     Security/                 SecurityPosture (status of macOS's own protections)
     Privacy/                  PrivacyAudit (which apps have which privacy permissions)
+    Network/                  NetworkScanner (which programs use the network right now)
     Scanning/                 FileEnumerator, Persistence (startup items), StartupChanges, RunningProcesses, BrowserExtensions, Mach-O detection, ScanCoordinator
     Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing

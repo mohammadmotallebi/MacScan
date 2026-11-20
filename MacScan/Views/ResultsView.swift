@@ -134,7 +134,8 @@ struct ResultsView: View {
     }
 }
 
-/// One tile per area of a Full Check, plus the macOS security settings. Clicking an area shows only its results.
+/// One tile per area of a Full Check, plus the macOS security settings and privacy permissions.
+/// Clicking an area shows only its results.
 struct FullCheckSummaryView: View {
     @Environment(AppState.self) private var state
     let session: ScanSession
@@ -166,6 +167,17 @@ struct FullCheckSummaryView: View {
             }
             .buttonStyle(.plain)
             .help(securityHelp)
+            if let privacy = info.privacy {
+                Button {
+                    state.selectedSection = .privacy
+                } label: {
+                    FullCheckTile(
+                        title: "Privacy", symbol: "hand.raised",
+                        color: Self.color(for: privacy), line: Self.line(for: privacy), isSelected: false)
+                }
+                .buttonStyle(.plain)
+                .help(Self.help(for: privacy))
+            }
         }
         .padding(8)
     }
@@ -176,6 +188,29 @@ struct FullCheckSummaryView: View {
         if summary.threats > 0 { parts.append("\(summary.threats) threat\(summary.threats == 1 ? "" : "s")") }
         if summary.warnings > 0 { parts.append("\(summary.warnings) warning\(summary.warnings == 1 ? "" : "s")") }
         return parts.isEmpty ? "No issues · \(summary.clean.formatted()) checked" : parts.joined(separator: " · ")
+    }
+
+    static func color(for privacy: PrivacySummary) -> Color {
+        guard privacy.readable else { return .secondary }
+        return privacy.warnings > 0 ? .orange : privacy.review > 0 ? .blue : .green
+    }
+
+    static func line(for privacy: PrivacySummary) -> String {
+        guard privacy.readable else { return "Needs Full Disk Access" }
+        var parts: [String] = []
+        if privacy.warnings > 0 { parts.append("\(privacy.warnings) warning\(privacy.warnings == 1 ? "" : "s")") }
+        let others = privacy.review - privacy.leftovers
+        if others > 0 { parts.append("\(others) worth a look") }
+        if privacy.leftovers > 0 { parts.append("\(privacy.leftovers) leftover\(privacy.leftovers == 1 ? "" : "s")") }
+        return parts.isEmpty ? "Nothing out of place · \(privacy.apps) apps" : parts.joined(separator: " · ")
+    }
+
+    static func help(for privacy: PrivacySummary) -> String {
+        guard privacy.readable else { return "MacScan couldn't read the privacy permissions. Give it Full Disk Access, then open the Privacy section." }
+        var text = "\(privacy.apps) \(privacy.apps == 1 ? "app had" : "apps had") a permission when this check ran."
+        if privacy.leftovers > 0 { text += " \(privacy.leftovers) belonged to apps that are no longer installed; you can remove them there." }
+        if privacy.partial { text += " Part of the list couldn't be read." }
+        return text + " Open the Privacy section for the current state."
     }
 
     private var securityColor: Color {

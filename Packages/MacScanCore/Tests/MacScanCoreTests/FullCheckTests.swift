@@ -43,6 +43,28 @@ import Testing
         #expect(summary == PostureSummary(passed: 1, total: 3, problems: ["Firewall", "Software updates"]))
     }
 
+    @Test func privacySummaryCounts() {
+        func grant(_ client: String, _ decision: PrivacyDecision, _ risk: PrivacyRisk, missing: Bool = false) -> PrivacyGrant {
+            PrivacyGrant(permission: .camera, client: client, name: client, path: nil, decision: decision, detail: nil, signer: nil,
+                         risk: risk, reasons: [], modified: nil, services: ["kTCCServiceCamera"], appMissing: missing)
+        }
+        let grants = [
+            grant("com.a", .allowed, .none), grant("com.b", .allowed, .warning), grant("com.gone", .allowed, .review, missing: true),
+            grant("com.c", .denied, .none),
+        ]
+        let full = PrivacySummary(report: PrivacyReport(grants: grants, user: .read(3), system: .read(1)))
+        #expect(full == PrivacySummary(apps: 3, warnings: 1, review: 1, leftovers: 1))
+
+        let partial = PrivacySummary(report: PrivacyReport(grants: grants, user: .read(3), system: .noAccess))
+        #expect(partial.readable && partial.partial)
+
+        let none = PrivacySummary(report: PrivacyReport(grants: [], user: .noAccess, system: .noAccess))
+        #expect(!none.readable && !none.partial)
+        // Both lists simply absent (a fresh Mac): nothing to read is not a problem worth a Full Disk Access hint.
+        let empty = PrivacySummary(report: PrivacyReport(grants: [], user: .read(0), system: .missing))
+        #expect(empty.readable && empty.apps == 0)
+    }
+
     @Test func oldHistoryWithoutAreasStillDecodes() throws {
         var session = ScanSession(targets: ["Applications"])
         session.findings = [Finding(path: "/a", severity: .warning, engine: .yara, reason: "r")]
@@ -53,12 +75,18 @@ import Testing
         object["findings"] = findings
         let decoded = try JSONDecoder().decode(ScanSession.self, from: JSONSerialization.data(withJSONObject: object))
         #expect(decoded.fullCheck == nil)
+
+        // A Full Check saved before privacy was added has no privacy summary.
+        let oldInfo = try JSONDecoder().decode(FullCheckInfo.self, from: Data(#"{"security":{"passed":1,"total":1,"problems":[]}}"#.utf8))
+        #expect(oldInfo.privacy == nil && oldInfo.security?.passed == 1)
         #expect(decoded.findings.first?.area == nil)
 
-        session.fullCheck = FullCheckInfo(security: PostureSummary(passed: 12, total: 13, problems: ["Firewall"]))
+        session.fullCheck = FullCheckInfo(security: PostureSummary(passed: 12, total: 13, problems: ["Firewall"]),
+                                          privacy: PrivacySummary(apps: 13, warnings: 0, review: 7, leftovers: 6))
         session.findings[0].area = .applications
         let again = try JSONDecoder().decode(ScanSession.self, from: JSONEncoder().encode(session))
         #expect(again.fullCheck?.security?.problems == ["Firewall"])
+        #expect(again.fullCheck?.privacy?.leftovers == 6)
         #expect(again.findings.first?.area == .applications)
     }
 

@@ -238,7 +238,7 @@ public struct PrivacyGrant: Identifiable, Hashable, Sendable {
 }
 
 public struct PrivacyReport: Sendable {
-    public enum Source: Equatable, Sendable {
+    public enum Source: Hashable, Sendable {
         case read(Int)
         case missing
         case noAccess

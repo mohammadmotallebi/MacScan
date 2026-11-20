@@ -24,6 +24,8 @@ struct ContentView: View {
                     .tag(AppSection.security)
                 Label("Privacy", systemImage: "hand.raised")
                     .tag(AppSection.privacy)
+                Label("Network", systemImage: "network")
+                    .tag(AppSection.network)
                 Label("Quarantine", systemImage: "archivebox")
                     .badge(state.quarantined.count)
                     .tag(AppSection.quarantine)
@@ -44,6 +46,7 @@ struct ContentView: View {
                 case .diskUsage: DiskUsageView()
                 case .security: SecurityView()
                 case .privacy: PrivacyView()
+                case .network: NetworkView()
                 case .quarantine: QuarantineView()
                 }
             }
@@ -63,7 +66,7 @@ struct ContentView: View {
                     return true
                 }
                 // These sections have nothing to drop onto.
-                if [.security, .privacy, .quarantine].contains(state.selectedSection) { return false }
+                if [.security, .privacy, .network, .quarantine].contains(state.selectedSection) { return false }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true
