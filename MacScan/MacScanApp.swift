@@ -75,6 +75,12 @@ struct MacScanApp: App {
                 }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
                 .disabled(state.security.isChecking)
+                Button("Check Privacy Permissions") {
+                    state.selectedSection = .privacy
+                    state.privacy.refresh()
+                }
+                .keyboardShortcut("y", modifiers: [.command, .shift])
+                .disabled(state.privacy.isChecking)
                 Divider()
                 Button("Cancel Scan") { state.cancelScan() }
                     .keyboardShortcut(".", modifiers: [.command])

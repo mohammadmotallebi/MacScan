@@ -9,6 +9,7 @@ An **on-demand** malware scanner for your own Mac. By default it runs only when 
 - **Running Processes scan**: lists the programs running right now and flags untrusted ones (unsigned, self-signed, running as root, deleted program file, temporary or hidden location)
 - **Browser Extensions scan**: lists the extensions of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari and flags sideloaded or very powerful ones
 - **Security check**: shows whether macOS's own protections (SIP, Gatekeeper, FileVault, firewall, XProtect, updates, screen lock, sharing) are on
+- **Privacy permissions**: shows which apps can use your camera, microphone, screen and files, and points out the ones worth a look
 - **Quarantine**: move a flagged item into a locked folder instead of the Trash, and restore it exactly where it was
 - **Startup Items scan**: lists everything set to start automatically (launch agents and daemons, privileged helpers, shell startup files, plug-ins, cron) and flags risky ones
 - **Optional VirusTotal hash lookup** with *your own* API key. Only SHA-256 hashes are sent, files are never uploaded.
@@ -270,6 +271,30 @@ MacScan only reads these settings with the system's own status tools and never c
 takes you to the right pane. It needs no administrator password. A setting that can't be read is shown as
 unknown, never as a pass.
 
+### Privacy permissions
+
+**Privacy** in the sidebar (⇧⌘Y) lists which apps macOS has allowed or denied for each permission: Camera,
+Microphone, Screen Recording, Accessibility, Input Monitoring, Full Disk Access, Automation, Files and
+Folders, Contacts, Calendar, Reminders, Photos, App Management and Developer Tools. Each row shows the app
+and who signed it.
+
+| Mark | When |
+| --- | --- |
+| **Warning** | an allowed app is unsigned, ad-hoc signed or self-signed (more so when it runs from Downloads, a temporary or a hidden folder) |
+| Worth a look | the app can't be found (a leftover if you removed it), its signature can't be read, or it can both record the screen and control the Mac |
+
+Denied apps are never marked. Homebrew/MacPorts builds and browser web-app shortcuts are not marked for
+being ad-hoc signed. **Flagged only** hides everything else.
+
+When an app is no longer installed, its row has a **Remove…** button, and **Remove Leftovers…** removes
+all of them after you confirm. MacScan uses macOS's own `tccutil reset` for this. That tool refuses an app it
+can't find, so MacScan makes a tiny stand-in app with the same ID in its own folder, runs the reset, and
+deletes the stand-in again. Permissions of installed apps are never touched.
+
+MacScan needs Full Disk Access to read the list, because macOS keeps it private. It reads a private copy of
+macOS's two permission databases and never edits them; **Open Settings** takes you to the right
+page. Location Services is not listed (macOS keeps it in a file only root can read).
+
 ### Quarantine
 
 Every scan result has **Quarantine…** next to **Move to Trash…**. After you confirm, the item is moved into
@@ -396,6 +421,7 @@ Packages/MacScanCore/         All scanning logic (Swift package, testable with `
   Sources/MacScanCore/
     Engines/                  ScanEngine protocol, ClamAV, YARA (+XProtect), AppIntegrity, VirusTotal, CodeSigning/KnownPublishers
     Security/                 SecurityPosture (status of macOS's own protections)
+    Privacy/                  PrivacyAudit (which apps have which privacy permissions)
     Scanning/                 FileEnumerator, Persistence (startup items), StartupChanges, RunningProcesses, BrowserExtensions, Mach-O detection, ScanCoordinator
     Background/               BackgroundAgent (launchd plists), DownloadsTracker, BackgroundScanWorker (headless mode)
     Support/                  ProcessRunner (cancellable), ToolLocator, FileLogger, Keychain, hashing

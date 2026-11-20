@@ -22,6 +22,8 @@ struct ContentView: View {
                     .tag(AppSection.diskUsage)
                 Label("Security", systemImage: "lock.shield")
                     .tag(AppSection.security)
+                Label("Privacy", systemImage: "hand.raised")
+                    .tag(AppSection.privacy)
                 Label("Quarantine", systemImage: "archivebox")
                     .badge(state.quarantined.count)
                     .tag(AppSection.quarantine)
@@ -41,6 +43,7 @@ struct ContentView: View {
                 case .uninstall: UninstallView()
                 case .diskUsage: DiskUsageView()
                 case .security: SecurityView()
+                case .privacy: PrivacyView()
                 case .quarantine: QuarantineView()
                 }
             }
@@ -59,8 +62,8 @@ struct ContentView: View {
                     state.diskUsage.scan(folder)
                     return true
                 }
-                // The Security section has nothing to drop onto.
-                if state.selectedSection == .security || state.selectedSection == .quarantine { return false }
+                // These sections have nothing to drop onto.
+                if [.security, .privacy, .quarantine].contains(state.selectedSection) { return false }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true

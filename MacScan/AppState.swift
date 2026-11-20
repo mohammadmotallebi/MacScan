@@ -10,6 +10,7 @@ enum AppSection: Hashable {
     case uninstall
     case diskUsage
     case security
+    case privacy
     case quarantine
 }
 
@@ -97,6 +98,7 @@ final class AppState {
     let uninstall = UninstallModel()
     let diskUsage = DiskUsageModel()
     let security = SecurityModel()
+    let privacy = PrivacyModel()
 
     // MARK: UI state
 
