@@ -48,6 +48,8 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     public var scheduledFullCheck: Bool = true
     /// Scan new items in ~/Downloads when they arrive (launchd starts MacScan when the folder changes).
     public var watchDownloads: Bool = false
+    /// Show an icon in the menu bar. Closing the window then keeps MacScan running there.
+    public var showInMenuBar: Bool = false
 
     public init() {}
 
@@ -93,6 +95,7 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         scheduleMinute = try c.decodeIfPresent(Int.self, forKey: .scheduleMinute) ?? d.scheduleMinute
         scheduledFullCheck = try c.decodeIfPresent(Bool.self, forKey: .scheduledFullCheck) ?? d.scheduledFullCheck
         watchDownloads = try c.decodeIfPresent(Bool.self, forKey: .watchDownloads) ?? d.watchDownloads
+        showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
     }
 }
 

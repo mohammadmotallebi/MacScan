@@ -232,6 +232,7 @@ public enum BackgroundScanWorker {
         do {
             try env.historyStore.save(session)
             env.historyStore.pruneCleanBackgroundSessions(keeping: cleanSessionsKept)
+            HistoryChangeSignal.post()
         } catch {
             env.logger.error("Could not save background scan to history: \(error.localizedDescription)")
         }

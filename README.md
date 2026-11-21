@@ -106,7 +106,7 @@ a result you've reviewed. It reappears if the file's contents change.
 
 | Tab | What you can change |
 | --- | --- |
-| General | Max file size, skip symlinks, "executables only" for Applications scans, excluded paths |
+| General | Menu bar icon, max file size, skip symlinks, "executables only" for Applications scans, excluded paths |
 | Engines | Turn engines on/off, paths to `clamscan`/`freshclam`/`yara`/`yarac`, ClamAV DB folder, YARA rules folder |
 | Background | Scheduled scan (daily or weekly, time, Full Check or Applications and Startup Items only), scan new downloads, notification status and test |
 | VirusTotal | Your API key (stored in the login Keychain), auto-lookup of flagged files |
@@ -420,6 +420,18 @@ its agent.
   Startup Items scan (labelled as MacScan's own agent).
 - The agents point at the copy of MacScan that turned them on. If you move the app, open it once and
   MacScan repairs them.
+
+### Menu bar icon
+
+Off by default. Turn it on in Settings › General › *Show MacScan in the menu bar*.
+
+- The shield shows the last Full Check: a check mark when nothing needs attention, an "!" for
+  warnings, settings that are off, risky permissions or new changes, and a filled "!" for threats.
+  It changes while a scan runs.
+- Its menu shows the last result in plain words (click it to open that result), and can start a
+  Full Check, check security settings or network activity, open MacScan or its settings, and quit.
+- While it's on, closing the window keeps MacScan running in the menu bar without a Dock icon.
+  Use *Quit MacScan* in the menu to close it. A background scan that finishes updates the icon.
 
 ### VirusTotal
 

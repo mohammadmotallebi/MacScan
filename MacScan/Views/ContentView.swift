@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppState.self) private var state
     @State private var dropTargeted = false
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var state = state
@@ -78,6 +79,10 @@ struct ContentView: View {
                                 measureMode: state.selectedSection == .diskUsage)
                 }
             }
+        }
+        .onAppear {
+            // Lets a notification click or the menu bar reopen this window after it was closed.
+            state.openMainWindow = { [openWindow] in openWindow(id: "main") }
         }
         .sheet(item: $state.fdaPrompt) { prompt in
             FullDiskAccessSheet(paths: prompt.paths)

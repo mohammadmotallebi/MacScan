@@ -87,6 +87,7 @@ final class AppState {
             SettingsStore.save(settings)
             refreshEngineStatus()
             backgroundSettingsChanged(from: oldValue)
+            if settings.showInMenuBar != oldValue.showInMenuBar { menuBarSettingChanged() }
         }
     }
 
@@ -135,6 +136,13 @@ final class AppState {
     var testNotificationInFlight = false
     /// A scan the History screen should select (set when a notification is clicked).
     var requestedHistorySelection: UUID?
+    /// Opens the main window. Set by views that can (the window can't be opened from here directly).
+    @ObservationIgnored var openMainWindow: (() -> Void)?
+
+    /// What the menu bar icon and its menu show.
+    var menuBarStatus: MenuBarStatus {
+        MenuBarStatus(history: history, isScanning: isScanning)
+    }
 
     // MARK: Private
 
@@ -142,6 +150,8 @@ final class AppState {
     private var freshclamTask: Task<Void, Never>?
     private var backgroundSyncTask: Task<Void, Never>?
     private var activationObserver: (any NSObjectProtocol)?
+    private var historySignalObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private lazy var menuBar = MenuBarController(state: self)
     private let historyStore = HistoryStore()
     private let targetStore = TargetStore()
     private let logger = FileLogger.shared
@@ -165,7 +175,30 @@ final class AppState {
                 self.reloadHistory()
             }
         }
+        // A background scan saved to History: show it now (the menu bar icon may be the only thing on screen).
+        historySignalObserver = DistributedNotificationCenter.default().addObserver(forName: HistoryChangeSignal.name, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.reloadHistory() }
+        }
         repairBackgroundAgentIfNeeded()
+        menuBar.update(visible: settings.showInMenuBar)
+    }
+
+    // MARK: - Menu bar
+
+    private func menuBarSettingChanged() {
+        logger.info("Menu bar icon \(settings.showInMenuBar ? "on" : "off")")
+        menuBar.update(visible: settings.showInMenuBar)
+        // Turned off while the window is closed: come back as a normal app, or MacScan would be invisible.
+        if !settings.showInMenuBar, NSApp.activationPolicy() != .regular {
+            bringToFront()
+        }
+    }
+
+    /// Shows the main window and the Dock icon again.
+    func bringToFront() {
+        NSApp.setActivationPolicy(.regular)
+        openMainWindow?()
+        NSApp.activate()
     }
 
     // MARK: - Background scans (scheduled, new downloads)
@@ -258,6 +291,7 @@ final class AppState {
         history = historyStore.loadAll()
         selectedSection = .history
         requestedHistorySelection = id
+        bringToFront()
     }
 
     // MARK: - Engine status

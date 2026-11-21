@@ -30,6 +30,12 @@ struct GeneralSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
+            Section("Menu bar") {
+                Toggle("Show MacScan in the menu bar", isOn: $state.settings.showInMenuBar)
+                Text("A shield shows the last Full Check, and its menu can start one. While this is on, closing the window keeps MacScan running in the menu bar. Use Quit MacScan in that menu to close it.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Limits") {
                 HStack {
                     TextField("Maximum file size", value: $state.settings.maxFileSizeMB, format: .number)

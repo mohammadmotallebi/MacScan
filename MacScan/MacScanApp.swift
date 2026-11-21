@@ -101,12 +101,50 @@ struct MacScanApp: App {
             SettingsView()
                 .environment(state)
         }
+
+        // Only there when "Show MacScan in the menu bar" is on.
+
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var windowObservers: [any NSObjectProtocol] = []
+
+    /// With the menu bar icon on, closing the window keeps MacScan running in the menu bar.
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        !SettingsStore.load().showInMenuBar
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let center = NotificationCenter.default
+        // Main window closed while living in the menu bar: hide the Dock icon too.
+        windowObservers.append(center.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { note in
+            nonisolated(unsafe) let window = note.object   // delivered on the main queue
+            MainActor.assumeIsolated {
+                guard Self.isMainWindow(window) else { return }
+                if SettingsStore.load().showInMenuBar {
+                    NSApp.setActivationPolicy(.accessory)
+                    FileLogger.shared.info("Window closed: MacScan stays in the menu bar")
+                }
+            }
+        })
+        // Main window back: show the Dock icon again.
+        windowObservers.append(center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main) { note in
+            nonisolated(unsafe) let window = note.object   // delivered on the main queue
+            MainActor.assumeIsolated {
+                guard Self.isMainWindow(window) else { return }
+                if NSApp.activationPolicy() != .regular {
+                    NSApp.setActivationPolicy(.regular)
+                    FileLogger.shared.info("Window open again: Dock icon back")
+                }
+            }
+        })
+    }
+
+    /// SwiftUI names the window after the scene id ("main"), sometimes with a suffix.
+    @MainActor private static func isMainWindow(_ object: Any?) -> Bool {
+        guard let window = object as? NSWindow else { return false }
+        return window.identifier?.rawValue.hasPrefix("main") == true
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
