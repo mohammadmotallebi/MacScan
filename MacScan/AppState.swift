@@ -15,21 +15,6 @@ enum AppSection: Hashable {
     case quarantine
 }
 
-/// What a Full Check reads besides the scan: the security settings and privacy permissions.
-struct FullCheckExtras: Sendable {
-    var checks: [PostureCheck]
-    var privacy: PrivacyReport
-
-    /// Marks the session as a Full Check, stores the summaries, and compares it with the previous one.
-    func attach(to session: inout ScanSession) {
-        session.fullCheck = FullCheckInfo(security: FullCheckInfo(checks: checks).security, privacy: PrivacySummary(report: privacy))
-        FullCheckChangeTracker().apply(to: &session, checks: checks, privacy: privacy)
-        if let changes = session.fullCheck?.changes {
-            FileLogger.shared.info("Full Check changes: \(changes.count) (" + Dictionary(grouping: changes, by: \.kind).map { "\($0.key.rawValue)=\($0.value.count)" }.sorted().joined(separator: ", ") + ")")
-        }
-    }
-}
-
 enum SeverityFilter: String, CaseIterable, Identifiable {
     case all, threat, warning, clean
 

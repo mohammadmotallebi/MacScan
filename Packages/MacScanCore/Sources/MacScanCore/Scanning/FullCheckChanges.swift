@@ -28,6 +28,43 @@ public struct FullCheckChange: Codable, Hashable, Sendable, Identifiable {
 
     /// New things and worse settings; a fix is good news.
     public var needsAttention: Bool { kind != .settingFixed }
+
+    /// A few words for a notification.
+    public var shortText: String {
+        switch kind {
+        case .newApp: "New app: \(title)"
+        case .newPermission: "\(title): " + (detail.split(separator: ".").first.map { String($0).replacingOccurrences(of: "Can now use ", with: "now uses ") } ?? detail)
+        case .settingChanged: "\(title) changed"
+        case .settingFixed: "\(title) fixed"
+        }
+    }
+}
+
+/// What a Full Check reads besides the scan: the security settings and the privacy permissions.
+public struct FullCheckExtras: Sendable {
+    public var checks: [PostureCheck]
+    public var privacy: PrivacyReport
+
+    public init(checks: [PostureCheck], privacy: PrivacyReport) {
+        self.checks = checks
+        self.privacy = privacy
+    }
+
+    /// Reads both, as the current user.
+    public static func read() async -> FullCheckExtras {
+        async let checks = SecurityPosture().check()
+        let privacy = PrivacyAudit().run()
+        return FullCheckExtras(checks: await checks, privacy: privacy)
+    }
+
+    /// Marks the session as a Full Check, stores the summaries, and compares it with the previous one.
+    public func attach(to session: inout ScanSession, tracker: FullCheckChangeTracker = FullCheckChangeTracker(), logger: FileLogger = .shared) {
+        session.fullCheck = FullCheckInfo(security: FullCheckInfo(checks: checks).security, privacy: PrivacySummary(report: privacy))
+        tracker.apply(to: &session, checks: checks, privacy: privacy)
+        if let changes = session.fullCheck?.changes {
+            logger.info("Full Check changes: \(changes.count) (" + Dictionary(grouping: changes, by: \.kind).map { "\($0.key.rawValue)=\($0.value.count)" }.sorted().joined(separator: ", ") + ")")
+        }
+    }
 }
 
 /// What a Full Check is compared with: the state after the previous completed one.

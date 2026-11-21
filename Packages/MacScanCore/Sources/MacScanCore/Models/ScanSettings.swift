@@ -44,6 +44,8 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     public var scheduleWeekday: Int = 1
     public var scheduleHour: Int = 12
     public var scheduleMinute: Int = 0
+    /// The scheduled scan is a Full Check (plus the custom folders). Off: Applications and Startup Items only.
+    public var scheduledFullCheck: Bool = true
     /// Scan new items in ~/Downloads when they arrive (launchd starts MacScan when the folder changes).
     public var watchDownloads: Bool = false
 
@@ -89,6 +91,7 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         scheduleWeekday = try c.decodeIfPresent(Int.self, forKey: .scheduleWeekday) ?? d.scheduleWeekday
         scheduleHour = try c.decodeIfPresent(Int.self, forKey: .scheduleHour) ?? d.scheduleHour
         scheduleMinute = try c.decodeIfPresent(Int.self, forKey: .scheduleMinute) ?? d.scheduleMinute
+        scheduledFullCheck = try c.decodeIfPresent(Bool.self, forKey: .scheduledFullCheck) ?? d.scheduledFullCheck
         watchDownloads = try c.decodeIfPresent(Bool.self, forKey: .watchDownloads) ?? d.watchDownloads
     }
 }

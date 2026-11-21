@@ -29,6 +29,9 @@ public struct BackgroundScanEnvironment: Sendable {
     public var logger: FileLogger
     /// Marks new and changed startup items in scheduled scans. Nil turns that off (tests).
     public var startupTracker: StartupChangeTracker?
+    /// Reads the security settings and permissions for a scheduled Full Check. Nil means plain scheduled scans only.
+    public var fullCheckReader: (@Sendable () async -> FullCheckExtras)?
+    public var fullCheckTracker = FullCheckChangeTracker()
     /// How long a new download must stay unchanged before it's scanned, and the longest wait for that.
     public var settleInterval: Duration = .seconds(2)
     public var settleTimeout: Duration = .seconds(600)
@@ -76,6 +79,14 @@ public struct BackgroundScanEnvironment: Sendable {
             logger: .shared
         )
         .with(startupTracker: StartupChangeTracker())
+        .with(fullCheckReader: { await FullCheckExtras.read() })
+    }
+
+    func with(fullCheckReader: (@Sendable () async -> FullCheckExtras)?, tracker: FullCheckChangeTracker? = nil) -> BackgroundScanEnvironment {
+        var copy = self
+        copy.fullCheckReader = fullCheckReader
+        if let tracker { copy.fullCheckTracker = tracker }
+        return copy
     }
 }
 
@@ -153,12 +164,17 @@ public enum BackgroundScanWorker {
             return []
         }
         let folders = env.customFolders.filter { FileManager.default.fileExists(atPath: $0.path) }
-        let targets: [ScanTarget] = [.applications, .startupItems] + folders.map { .path($0) }
-        env.logger.info("Scheduled scan starting")
+        let reader = env.settings.scheduledFullCheck ? env.fullCheckReader : nil
+        let base: [ScanTarget] = reader != nil ? FullCheck.targets : [.applications, .startupItems]
+        let targets = base + folders.map { .path($0) }
+        env.logger.info(reader != nil ? "Scheduled Full Check starting" : "Scheduled scan starting")
         let previous = env.historyStore.loadAll().first { $0.trigger == .scheduled }
+        // Settings and permissions are read while the scan runs.
+        let extras = reader.map { read in Task { await read() } }
         var session = await env.coordinator.run(targets: targets) { _ in }
         session.trigger = .scheduled
         if let tracker = env.startupTracker { tracker.apply(to: &session) } else { session.startupSnapshot = nil }
+        if let extras { (await extras.value).attach(to: &session, tracker: env.fullCheckTracker, logger: env.logger) }
         await finish(session, previous: previous, env)
         return [session]
     }
@@ -241,7 +257,17 @@ public enum BackgroundScanWorker {
         // Startup items that appeared or changed since the last scan are worth a notification on their
         // own, even when nothing about them is flagged.
         let startup = session.startupChanges.map { $0.added.count + $0.changed.count } ?? 0
+        // What a Full Check found different from the last one (fixes alone don't notify).
+        let changes = session.fullCheck?.changes?.filter(\.needsAttention) ?? []
+        let changeNote = changes.isEmpty ? "" : " · \(changes.count) \(changes.count == 1 ? "change" : "changes") since the last Full Check"
         guard !flagged.isEmpty else {
+            if !changes.isEmpty {
+                var body = changes.prefix(3).map(\.shortText).joined(separator: " · ")
+                if changes.count > 3 { body += " and \(changes.count - 3) more" }
+                if startup > 0 { body += " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" }
+                return BackgroundNotification(title: "Full Check: \(changes.count) \(changes.count == 1 ? "change" : "changes") since the last check",
+                                              body: body, sessionID: session.id)
+            }
             guard startup > 0, let changes = session.startupChanges else { return nil }
             var names = (changes.added + changes.changed).prefix(3).joined(separator: ", ")
             if startup > 3 { names += " and \(startup - 3) more" }
@@ -266,6 +292,6 @@ public enum BackgroundScanWorker {
         case nil: names
         }
         let suffix = startup > 0 ? " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" : ""
-        return BackgroundNotification(title: title, body: body + suffix, sessionID: session.id)
+        return BackgroundNotification(title: title, body: body + suffix + changeNote, sessionID: session.id)
     }
 }

@@ -267,8 +267,14 @@ struct BackgroundSettingsView: View {
                         }
                     }
                     DatePicker("Time", selection: scheduleTime, displayedComponents: .hourAndMinute)
+                    Picker("What to scan", selection: $state.settings.scheduledFullCheck) {
+                        Text("Full Check").tag(true)
+                        Text("Applications and Startup Items only").tag(false)
+                    }
                 }
-                Text("Scans Applications, Startup Items and your scan folders. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes.")
+                Text(state.settings.scheduledFullCheck
+                     ? "Runs a Full Check (plus your scan folders) and tells you what changed since the last one: new apps, new permissions, settings that got worse. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes."
+                     : "Scans Applications, Startup Items and your scan folders. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

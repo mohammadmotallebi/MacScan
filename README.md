@@ -108,7 +108,7 @@ a result you've reviewed. It reappears if the file's contents change.
 | --- | --- |
 | General | Max file size, skip symlinks, "executables only" for Applications scans, excluded paths |
 | Engines | Turn engines on/off, paths to `clamscan`/`freshclam`/`yara`/`yarac`, ClamAV DB folder, YARA rules folder |
-| Background | Scheduled scan (daily or weekly, time), scan new downloads, notification status and test |
+| Background | Scheduled scan (daily or weekly, time, Full Check or Applications and Startup Items only), scan new downloads, notification status and test |
 | VirusTotal | Your API key (stored in the login Keychain), auto-lookup of flagged files |
 | Privacy | Full Disk Access status and instructions, log location |
 | Ignored | Review and un-ignore hidden results |
@@ -392,8 +392,9 @@ Whatever the list says, MacScan refuses to remove top-level or system locations 
 
 Both options are in *Settings › Background* and are off by default.
 
-- **Scan on a schedule** runs a scan of Applications, Startup Items and your scan folders every day or
-  every week at the time you pick.
+- **Scan on a schedule** runs a **Full Check** (plus your scan folders) every day or every week at the
+  time you pick, and compares it with the last Full Check. Set "What to scan" to *Applications and Startup
+  Items only* for the older, smaller scan.
 - **Scan new downloads** scans each new item that arrives in `~/Downloads`. Items that were already there
   when you turned it on are not scanned, and unfinished downloads (`.crdownload`, `.download`, `.part`)
   wait until they are complete.
@@ -406,8 +407,12 @@ its agent.
 
 - Every background scan is saved in History, marked *Scheduled* or *New downloads*. Of the background
   scans that found nothing, only the 10 newest per kind are kept.
-- You get a notification only when something new is flagged. A scheduled scan doesn't notify again about
-  results its previous run already had. Click the notification to open the scan in History.
+- You get a notification only when something new is flagged, or when a scheduled Full Check finds changes
+  since the last Full Check ("Full Check: 2 changes since the last check · Firewall changed · Zoom: now uses
+  Screen Recording"). Fixes alone and known results don't notify again. Click the notification to open
+  the scan in History.
+- A scheduled Full Check reads the security settings and permissions as you. Without Full Disk Access the
+  permissions can't be read, so they aren't compared.
 - Background scans never run as administrator and never move or delete anything.
 - Scheduled scans run while you're logged in. A scan missed while the Mac was asleep runs after it wakes;
   one missed while the Mac was off or you were logged out is skipped.

@@ -413,6 +413,90 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         #expect(f.notifier.sent.last?.body == "New since the last scheduled scan: bad-two.sh")
     }
 
+    /// What the fake Full Check reader returns; tests change it between runs.
+    final class ExtrasBox: @unchecked Sendable {
+        var value = FullCheckExtras(checks: [], privacy: PrivacyReport(grants: [], user: .read(0), system: .read(0)))
+    }
+
+    static func grant(_ client: String, _ permission: PrivacyPermission) -> PrivacyGrant {
+        PrivacyGrant(permission: permission, client: client, name: client, path: nil, decision: .allowed, detail: nil,
+                     signer: nil, risk: .none, reasons: [], modified: nil, services: [])
+    }
+
+    func fullCheckFixture(fullCheck: Bool) throws -> (Fixture, ExtrasBox) {
+        var f = try makeFixture { $0.scheduledScanEnabled = true; $0.scheduledFullCheck = fullCheck }
+        f.env.settings.excludedPaths = ["/Applications", "~/Applications"]
+        let home = f.dir.url.appendingPathComponent("Home")
+        f.env.coordinator = ScanCoordinator(
+            engines: [FakeEngine()], settings: f.env.settings, logger: logger,
+            persistenceLocations: PersistenceLocations(home: home, root: f.dir.url.appendingPathComponent("Root"), includeCrontab: false),
+            processLister: FakeProcessList(processes: []),
+            browserLocations: BrowserLocations(home: home, safariListing: { _ in nil }))
+        let box = ExtrasBox()
+        f.env = f.env.with(fullCheckReader: { box.value }, tracker: FullCheckChangeTracker(file: f.dir.url.appendingPathComponent("fullcheck-baseline.json")))
+        return (f, box)
+    }
+
+    @Test func scheduledFullCheckNotifiesAboutChanges() async throws {
+        let (f, box) = try fullCheckFixture(fullCheck: true)
+        let firewallOn = PostureCheck(id: .firewall, title: "Firewall", status: .pass, summary: "On.")
+        box.value = FullCheckExtras(checks: [firewallOn], privacy: PrivacyReport(grants: [Self.grant("Zoom", .camera)], user: .read(1), system: .read(0)))
+
+        // First run: a Full Check that only saves the starting point.
+        let first = try #require(await BackgroundScanWorker.run(.scheduled, environment: f.env).first)
+        #expect(first.targets == ["Applications", "Startup Items", "Running Processes", "Browser Extensions"])
+        #expect(first.title == "Full Check" && first.trigger == .scheduled)
+        #expect(first.fullCheck?.tracked == true && first.fullCheck?.changes == nil)
+        #expect(first.fullCheck?.security == PostureSummary(passed: 1, total: 1, problems: []))
+        #expect(f.notifier.sent.isEmpty)
+
+        // The firewall goes off and Zoom gains Screen Recording.
+        box.value = FullCheckExtras(checks: [PostureCheck(id: .firewall, title: "Firewall", status: .warning, summary: "Off.")],
+                                    privacy: PrivacyReport(grants: [Self.grant("Zoom", .camera), Self.grant("Zoom", .screenRecording)], user: .read(2), system: .read(0)))
+        let second = try #require(await BackgroundScanWorker.run(.scheduled, environment: f.env).first)
+        #expect(second.fullCheck?.changes?.count == 2)
+        #expect(f.notifier.sent.count == 1)
+        #expect(f.notifier.sent.last?.title == "Full Check: 2 changes since the last check")
+        #expect(f.notifier.sent.last?.body == "Firewall changed · Zoom: now uses Screen Recording")
+        #expect(f.notifier.sent.last?.sessionID == second.id)
+
+        // Nothing new: no notification. A fix alone doesn't notify either.
+        _ = await BackgroundScanWorker.run(.scheduled, environment: f.env)
+        box.value.checks = [firewallOn]
+        let fixed = try #require(await BackgroundScanWorker.run(.scheduled, environment: f.env).first)
+        #expect(fixed.fullCheck?.changes?.map(\.kind) == [.settingFixed])
+        #expect(f.notifier.sent.count == 1)
+    }
+
+    @Test func scheduledScanWithoutFullCheck() async throws {
+        let (f, _) = try fullCheckFixture(fullCheck: false)
+        let session = try #require(await BackgroundScanWorker.run(.scheduled, environment: f.env).first)
+        #expect(session.targets == ["Applications", "Startup Items"])
+        #expect(session.fullCheck == nil)
+        #expect(!FileManager.default.fileExists(atPath: f.dir.url.appendingPathComponent("fullcheck-baseline.json").path))
+    }
+
+    @Test func flaggedNotificationMentionsFullCheckChanges() {
+        var session = ScanSession()
+        session.trigger = .scheduled
+        session.findings = [Finding(path: "/x/bad.sh", severity: .threat, engine: .yara, reason: "r")]
+        var info = FullCheckInfo()
+        info.changes = [FullCheckChange(kind: .newApp, title: "Foo", detail: "d"), FullCheckChange(kind: .settingFixed, title: "Firewall", detail: "On.")]
+        session.fullCheck = info
+        let note = BackgroundScanWorker.notification(for: session, previous: nil)
+        #expect(note?.title == "MacScan found 1 threat")
+        #expect(note?.body == "Scheduled scan: bad.sh · 1 change since the last Full Check")
+        #expect(FullCheckChange(kind: .newApp, title: "Foo", detail: "d").shortText == "New app: Foo")
+    }
+
+    @Test func scheduledFullCheckSettingDefaultsOn() throws {
+        let old = try JSONDecoder().decode(ScanSettings.self, from: Data(#"{"scheduledScanEnabled":true}"#.utf8))
+        #expect(old.scheduledFullCheck && old.scheduledScanEnabled)
+        var off = ScanSettings()
+        off.scheduledFullCheck = false
+        #expect(try JSONDecoder().decode(ScanSettings.self, from: JSONEncoder().encode(off)).scheduledFullCheck == false)
+    }
+
     @Test func notificationWordingForWarningsAndManyItems() {
         var session = ScanSession()
         session.trigger = .downloads
