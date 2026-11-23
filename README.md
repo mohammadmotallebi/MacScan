@@ -25,7 +25,7 @@ MacScan **never deletes or moves anything on its own.**
 
 ## Requirements
 
-- macOS 14 Sonoma or later, Apple Silicon
+- macOS 26 Tahoe or later, Apple Silicon
 - Xcode 16 or later (tested with Xcode 27.1)
 - [Homebrew](https://brew.sh) for ClamAV and YARA (optional; the other engines work without them)
 
@@ -89,11 +89,13 @@ For Desktop, Documents and Downloads, macOS may instead show a one-time consent 
 
 ## 4. First run
 
-1. Click **Update virus database** (first download takes a few minutes).
-2. Click **Scan Applications**, add folders and click **Scan Folders**, or drop any file or folder
-   onto the window.
+1. On the home screen, click the **Engines** card and then **Update virus database** (the first
+   download takes a few minutes).
+2. Click **Run Full Check**, pick one area under **Scan one area**, or drop any file or folder onto
+   the window. The home screen shows how the last Full Check went, plus Security, Privacy, Network,
+   Quarantine and Engines cards.
 3. Review the results. Select a row for details. Right-click for Reveal in Finder, VirusTotal lookup,
-   Ignore, or Move to Trash.
+   Ignore, or Move to Trash. Click **Home** to go back.
 
 Expect some **Warnings** for legitimate software: ad-hoc signed open-source apps, older apps with an
 obsolete signature format, apps whose bundle was modified by an updater, and so on. Each warning
@@ -423,15 +425,16 @@ its agent.
 
 ### Menu bar icon
 
-Off by default. Turn it on in Settings › General › *Show MacScan in the menu bar*.
+On by default. Turn it off in Settings › General › *Show MacScan in the menu bar*; then closing
+the window quits MacScan as before.
 
-- The shield shows the last Full Check: a check mark when nothing needs attention, an "!" for
-  warnings, settings that are off, risky permissions or new changes, and a filled "!" for threats.
-  It changes while a scan runs.
+- The icon is a one-color version of MacScan's icon (a shield with a bug). A small mark in its corner
+  shows the last Full Check: none when nothing needs attention, an "!" for warnings, settings that
+  are off, risky permissions or new changes, a filled "!" for threats, and "…" while a scan runs.
 - Its menu shows the last result in plain words (click it to open that result), and can start a
   Full Check, check security settings or network activity, open MacScan or its settings, and quit.
 - While it's on, closing the window keeps MacScan running in the menu bar without a Dock icon.
-  Use *Quit MacScan* in the menu to close it. A background scan that finishes updates the icon.
+  Only *Quit MacScan* (in that menu, or ⌘Q) closes it. A background scan that finishes updates the icon.
 
 ### VirusTotal
 

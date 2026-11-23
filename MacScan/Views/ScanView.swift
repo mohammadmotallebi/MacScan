@@ -5,222 +5,80 @@ struct ScanView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        HSplitView {
-            ScanControlsPanel()
-                .frame(minWidth: 280, idealWidth: 310, maxWidth: 380, maxHeight: .infinity, alignment: .top)
-                .background(.background.secondary)
-
-            VStack(spacing: 0) {
-                if state.isScanning, let progress = state.progress {
-                    ScanProgressView(progress: progress)
-                        .padding()
-                    Divider()
-                }
-                if let session = state.currentSession {
+        Group {
+            if state.isScanning, let progress = state.progress {
+                ScanningView(progress: progress)
+                    .transition(.opacity)
+            } else if let session = state.currentSession {
+                VStack(spacing: 0) {
                     SessionSummaryBar(session: session)
                     Divider()
                     ResultsView(session: session)
-                } else if !state.isScanning {
-                    ContentUnavailableView {
-                        Label("Ready to scan", systemImage: "checkmark.shield")
-                    } description: {
-                        Text("Run a Full Check, scan one area or your saved folders, or drop any file or folder onto this window.\nMacScan only runs while this window is open.")
-                    }
-                } else {
-                    Spacer()
                 }
+                .transition(.opacity)
+            } else {
+                HomeView()
+                    .transition(.opacity)
             }
-            .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.smooth(duration: 0.35), value: state.isScanning)
+        .animation(.smooth(duration: 0.35), value: state.currentSession?.id)
+        .frame(minWidth: 620, maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("MacScan")
     }
 }
 
-// MARK: - Left panel
+// MARK: - Scanning
 
-struct ScanControlsPanel: View {
+struct ScanningView: View {
     @Environment(AppState.self) private var state
+    let progress: ScanProgress
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                GroupBox {
-                    VStack(spacing: 8) {
-                        Button {
-                            state.scanFullCheck()
-                        } label: {
-                            Label("Full Check", systemImage: "checkmark.shield")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .help("Applications, startup items, running processes and browser extensions in one scan, plus the macOS security settings. Your saved folders are not included.")
-
-                        Divider().padding(.vertical, 2)
-
-                        Button {
-                            state.scanApplications()
-                        } label: {
-                            Label("Scan Applications", systemImage: "app.badge.checkmark")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .controlSize(.large)
-
-                        Button {
-                            state.scanStartupItems()
-                        } label: {
-                            Label("Scan Startup Items", systemImage: "power.circle")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .controlSize(.large)
-                        .help("Everything set to start automatically: launch agents & daemons, privileged helpers, shell startup files, plug-ins and cron jobs")
-
-                        Button {
-                            state.scanRunningProcesses()
-                        } label: {
-                            Label("Scan Running Processes", systemImage: "cpu")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .controlSize(.large)
-                        .help("The programs running right now: who signed them, who runs them and where they run from. Nothing is stopped or changed.")
-
-                        Button {
-                            state.scanBrowserExtensions()
-                        } label: {
-                            Label("Scan Browser Extensions", systemImage: "puzzlepiece.extension")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .controlSize(.large)
-                        .help("Extensions in Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari: where they came from and what they may do. Nothing is disabled or removed.")
-
-                        Button {
-                            state.scanCustomFolders()
-                        } label: {
-                            Label("Scan Folders", systemImage: "folder.badge.gearshape")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .controlSize(.large)
-                        .disabled(state.customFolders.isEmpty)
-                        .help(state.customFolders.isEmpty ? "Add folders below first" : "Scan all saved folders")
-
-                        Button {
-                            state.chooseAndScan()
-                        } label: {
-                            Label("Scan File or Folder…", systemImage: "doc.viewfinder")
-                                .frame(maxWidth: .infinity)
-                        }
-
-                        Divider().padding(.vertical, 2)
-                        Toggle(isOn: Bindable(state).settings.elevatedScans) {
-                            Label("Scan as administrator", systemImage: "lock.open")
-                        }
-                        .toggleStyle(.switch)
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .help("Asks for your administrator password at the start of each scan, then reads files owned by other users and the system. Mail, Safari and other privacy-protected data still need Full Disk Access.")
-                    }
-                    .disabled(state.isScanning)
-                    .padding(4)
-                } label: {
-                    Text("Scan")
+        VStack(spacing: 26) {
+            Spacer()
+            StatusRing(color: .accentColor, symbol: "shield.lefthalf.filled", progress: progress.fraction, size: 190, pulse: true)
+            VStack(spacing: 8) {
+                Text(progress.phase.rawValue)
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                if let fraction = progress.fraction {
+                    Text(fraction.formatted(.percent.precision(.fractionLength(0))))
+                        .font(.title2.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(.tint)
+                        .contentTransition(.numericText())
+                        .animation(.smooth, value: fraction)
                 }
-
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if state.customFolders.isEmpty {
-                            Text("No folders yet. Add the folders you want “Scan Folders” to check.")
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                        }
-                        ForEach(state.customFolders, id: \.self) { url in
-                            HStack(spacing: 6) {
-                                Image(systemName: "folder")
-                                    .foregroundStyle(.secondary)
-                                Text(url.lastPathComponent)
-                                    .lineLimit(1)
-                                    .help(url.path)
-                                Spacer()
-                                Button {
-                                    state.removeFolder(url)
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .buttonStyle(.borderless)
-                                .help("Remove from list (does not touch the folder)")
-                            }
-                            .contextMenu {
-                                Button("Scan Only This Folder") { state.scan(urls: [url]) }
-                                Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
-                                Divider()
-                                Button("Remove from List") { state.removeFolder(url) }
-                            }
-                        }
-                        Button {
-                            state.addFolders()
-                        } label: {
-                            Label("Add Folder…", systemImage: "plus")
-                        }
-                        .buttonStyle(.borderless)
-                        .padding(.top, 2)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(4)
-                } label: {
-                    Text("Folders")
+                if progress.itemsTotal > 0 {
+                    Text("\(progress.itemsDone.formatted()) of \(progress.itemsTotal.formatted()) files")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
                 }
-
-                GroupBox {
-                    VStack(alignment: .leading, spacing: 10) {
-                        EngineStatusRow(engine: .clamav)
-                        Button {
-                            state.updateDatabase()
-                        } label: {
-                            Label(state.freshclam?.running == true ? "Updating…" : "Update virus database", systemImage: "arrow.down.circle")
-                        }
-                        .controlSize(.small)
-                        .disabled(state.isScanning)
-                        .padding(.leading, 22)
-                        Divider()
-                        EngineStatusRow(engine: .yara)
-                        EngineStatusRow(engine: .integrity)
-                        EngineStatusRow(engine: .persistence)
-                        EngineStatusRow(engine: .processes)
-                        EngineStatusRow(engine: .extensions)
-                        EngineStatusRow(engine: .virustotal)
-                    }
-                    .padding(4)
-                } label: {
-                    Text("Engines")
-                }
-
-                if !state.fullDiskAccessLikelyGranted {
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Label("Full Disk Access not granted", systemImage: "lock.shield")
-                                .font(.callout.weight(.semibold))
-                                .foregroundStyle(.orange)
-                            Text("Some protected folders (Mail, Safari, other apps' data) can't be scanned.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Button("How to grant access…") {
-                                state.fdaPrompt = FDAPrompt(paths: [])
-                            }
-                            .controlSize(.small)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(4)
-                    }
-                }
-
-                Text("Tip: drag files or folders onto the window to scan them.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            Text(progress.status ?? progress.currentFile ?? " ")
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 520)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .glassCard(radius: 12)
+                .help(progress.currentFile ?? "")
+            Button(role: .cancel) {
+                state.cancelScan()
+            } label: {
+                Label("Cancel Scan", systemImage: "xmark")
+                    .padding(.horizontal, 8)
+            }
+            .buttonStyle(.glass)
+            .controlSize(.large)
+            .keyboardShortcut(.cancelAction)
+            Spacer()
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HomeBackground(color: .accentColor))
     }
 }
 
@@ -275,40 +133,6 @@ struct EngineStatusRow: View {
     }
 }
 
-// MARK: - Progress
-
-struct ScanProgressView: View {
-    @Environment(AppState.self) private var state
-    let progress: ScanProgress
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(progress.phase.rawValue).font(.headline)
-                Spacer()
-                if progress.itemsTotal > 0 {
-                    Text("\(progress.itemsDone.formatted()) / \(progress.itemsTotal.formatted()) files")
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                Button("Cancel", role: .cancel) { state.cancelScan() }
-                    .keyboardShortcut(.cancelAction)
-            }
-            if let fraction = progress.fraction {
-                ProgressView(value: fraction)
-            } else {
-                ProgressView().progressViewStyle(.linear)
-            }
-            Text(progress.status ?? progress.currentFile ?? " ")
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .help(progress.currentFile ?? "")
-        }
-    }
-}
-
 // MARK: - Summary bar
 
 struct SessionSummaryBar: View {
@@ -317,19 +141,27 @@ struct SessionSummaryBar: View {
     @State private var showNotes = false
 
     var body: some View {
-        HStack(spacing: 14) {
-            SeverityCount(severity: .threat, count: session.count(.threat))
-            SeverityCount(severity: .warning, count: session.count(.warning))
-            SeverityCount(severity: .clean, count: session.count(.clean))
-            Divider().frame(height: 18)
-            Text("\(session.itemsScanned.formatted()) of \(session.itemsTotal.formatted()) items")
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
+        HStack(spacing: 10) {
+            Button {
+                state.currentSession = nil
+            } label: {
+                Label("Home", systemImage: "chevron.left")
+            }
+            .buttonStyle(.glass)
+            .help("Back to the home screen")
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.title).font(.headline).lineLimit(1)
+                Text("\(session.itemsScanned.formatted()) of \(session.itemsTotal.formatted()) items · \(session.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .padding(.trailing, 6)
+            chip(.threat)
+            chip(.warning)
+            chip(.clean)
             if session.status != .completed {
-                Text(session.status == .cancelled ? "Cancelled" : "Failed")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(.orange.opacity(0.2), in: Capsule())
+                CountChip(symbol: "exclamationmark.circle", text: session.status == .cancelled ? "Cancelled" : "Failed", color: .orange)
             }
             Spacer()
             if session.hasPermissionIssues {
@@ -354,7 +186,13 @@ struct SessionSummaryBar: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
+    }
+
+    private func chip(_ severity: Severity) -> some View {
+        let n = session.count(severity)
+        let word = severity == .clean ? "clean" : severity.title.lowercased() + (n == 1 ? "" : "s")
+        return CountChip(symbol: severity.symbol, text: "\(n.formatted()) \(word)", color: severity.color, dimmed: n == 0 && severity != .clean)
     }
 }
 

@@ -20,14 +20,13 @@ public struct MenuBarStatus: Equatable, Sendable {
     /// The Full Check the lines are about.
     public var sessionID: UUID?
 
-    /// SF Symbol for the menu bar.
-    public var symbol: String {
+    /// SF Symbol for the small mark in the corner of the menu bar icon, or nil for none.
+    public var badgeSymbol: String? {
         switch level {
-        case .unknown: "shield"
-        case .clear: "checkmark.shield"
-        case .attention: "exclamationmark.shield"
-        case .threat: "exclamationmark.shield.fill"
-        case .scanning: "shield.lefthalf.filled"
+        case .unknown, .clear: nil
+        case .attention: "exclamationmark.circle"
+        case .threat: "exclamationmark.circle.fill"
+        case .scanning: "ellipsis.circle.fill"
         }
     }
 

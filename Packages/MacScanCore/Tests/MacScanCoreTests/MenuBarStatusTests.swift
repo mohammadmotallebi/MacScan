@@ -22,7 +22,7 @@ import Testing
     @Test func noFullCheckYet() {
         let plain = ScanSession(startedAt: now)   // not a Full Check
         let status = MenuBarStatus(history: [plain], isScanning: false, now: now)
-        #expect(status.level == .unknown && status.symbol == "shield")
+        #expect(status.level == .unknown && status.badgeSymbol == nil)
         #expect(status.title == "No Full Check yet" && status.sessionID == nil)
         #expect(MenuBarStatus(history: [], isScanning: true, now: now).level == .scanning)
     }
@@ -31,7 +31,7 @@ import Testing
         let session = fullCheck(minutesAgo: 130, findings: [finding(.clean)],
                                 info: FullCheckInfo(security: PostureSummary(passed: 19, total: 19, problems: [])))
         let status = MenuBarStatus(history: [session], isScanning: false, now: now)
-        #expect(status.level == .clear && status.symbol == "checkmark.shield")
+        #expect(status.level == .clear && status.badgeSymbol == nil)
         #expect(status.title == "Last Full Check: 2 hours ago")
         #expect(status.detail == "Nothing needs attention.")
         #expect(status.sessionID == session.id)
@@ -45,13 +45,13 @@ import Testing
                         FullCheckChange(kind: .settingFixed, title: "Guest", detail: "y")]
         let warn = fullCheck(minutesAgo: 5, findings: [finding(.warning), finding(.warning)], info: info)
         let status = MenuBarStatus(history: [warn], isScanning: false, now: now)
-        #expect(status.level == .attention && status.symbol == "exclamationmark.shield")
+        #expect(status.level == .attention && status.badgeSymbol == "exclamationmark.circle")
         #expect(status.detail == "2 warnings · 2 settings off · 1 risky permission · 1 change")
         #expect(status.title == "Last Full Check: 5 minutes ago")
 
         let bad = fullCheck(minutesAgo: 0.2, findings: [finding(.threat), finding(.warning)])
         let threat = MenuBarStatus(history: [bad], isScanning: false, now: now)
-        #expect(threat.level == .threat && threat.detail == "1 threat · 1 warning")
+        #expect(threat.level == .threat && threat.badgeSymbol == "exclamationmark.circle.fill" && threat.detail == "1 threat · 1 warning")
         #expect(threat.title == "Last Full Check: just now")
     }
 
@@ -72,9 +72,9 @@ import Testing
         #expect(MenuBarStatus.ago(now.addingTimeInterval(60), now: now) == "just now")
     }
 
-    @Test func settingDefaultsOff() throws {
-        #expect(ScanSettings().showInMenuBar == false)
+    @Test func settingDefaultsOn() throws {
+        #expect(ScanSettings().showInMenuBar == true)
         let old = try JSONDecoder().decode(ScanSettings.self, from: Data("{}".utf8))
-        #expect(old.showInMenuBar == false)
+        #expect(old.showInMenuBar == true)
     }
 }

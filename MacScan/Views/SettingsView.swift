@@ -32,7 +32,7 @@ struct GeneralSettingsView: View {
         Form {
             Section("Menu bar") {
                 Toggle("Show MacScan in the menu bar", isOn: $state.settings.showInMenuBar)
-                Text("A shield shows the last Full Check, and its menu can start one. While this is on, closing the window keeps MacScan running in the menu bar. Use Quit MacScan in that menu to close it.")
+                Text("MacScan's icon shows the last Full Check, and its menu can start one. While this is on, closing the window keeps MacScan running in the menu bar, and only Quit MacScan (in that menu, or ⌘Q) closes it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

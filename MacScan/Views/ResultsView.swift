@@ -336,21 +336,25 @@ struct FullCheckTile: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: symbol)
-                .font(.callout.weight(.semibold))
-                .lineLimit(1)
-            Text(line)
-                .font(.caption)
-                .foregroundStyle(color)
-                .lineLimit(1)
+        HStack(spacing: 10) {
+            IconTile(symbol: symbol, color: color == .secondary ? .gray : color, size: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(color)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(isSelected ? AnyShapeStyle(.tint.opacity(0.18)) : AnyShapeStyle(.quaternary.opacity(0.5)), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), lineWidth: 1))
-        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, 9)
+        .contentShape(.rect(cornerRadius: 14))
+        .glassCard(tint: isSelected ? .accentColor : nil, radius: 14, interactive: true)
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isSelected ? AnyShapeStyle(.tint) : AnyShapeStyle(.clear), lineWidth: 1.5))
     }
 }
 

@@ -48,8 +48,9 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     public var scheduledFullCheck: Bool = true
     /// Scan new items in ~/Downloads when they arrive (launchd starts MacScan when the folder changes).
     public var watchDownloads: Bool = false
-    /// Show an icon in the menu bar. Closing the window then keeps MacScan running there.
-    public var showInMenuBar: Bool = false
+    /// Show an icon in the menu bar. Closing the window then keeps MacScan running there,
+    /// and only Quit MacScan closes it.
+    public var showInMenuBar: Bool = true
 
     public init() {}
 

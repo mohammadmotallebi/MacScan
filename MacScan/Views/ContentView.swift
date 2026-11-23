@@ -12,26 +12,32 @@ struct ContentView: View {
             // The selection value (tag) must be the OUTERMOST modifier on each row:
             // a modifier applied after it (e.g. .badge) hides it, and clicks then select nothing.
             List(selection: $state.selectedSection) {
-                Label("Scan", systemImage: "magnifyingglass")
-                    .tag(AppSection.scan)
-                Label("History", systemImage: "clock.arrow.circlepath")
-                    .badge(state.history.count)
-                    .tag(AppSection.history)
-                Label("Uninstall", systemImage: "trash.square")
-                    .tag(AppSection.uninstall)
-                Label("Disk Usage", systemImage: "chart.bar.doc.horizontal")
-                    .tag(AppSection.diskUsage)
-                Label("Security", systemImage: "lock.shield")
-                    .tag(AppSection.security)
-                Label("Privacy", systemImage: "hand.raised")
-                    .tag(AppSection.privacy)
-                Label("Network", systemImage: "network")
-                    .tag(AppSection.network)
-                Label("Quarantine", systemImage: "archivebox")
-                    .badge(state.quarantined.count)
-                    .tag(AppSection.quarantine)
+                Section("Check") {
+                    SidebarRow(title: "Scan", symbol: "shield.lefthalf.filled", color: .blue)
+                        .tag(AppSection.scan)
+                    SidebarRow(title: "Security", symbol: "lock.shield.fill", color: .indigo)
+                        .tag(AppSection.security)
+                    SidebarRow(title: "Privacy", symbol: "hand.raised.fill", color: .pink)
+                        .tag(AppSection.privacy)
+                    SidebarRow(title: "Network", symbol: "network", color: .green)
+                        .tag(AppSection.network)
+                }
+                Section("Clean up") {
+                    SidebarRow(title: "Uninstall", symbol: "trash.fill", color: .red)
+                        .tag(AppSection.uninstall)
+                    SidebarRow(title: "Disk Usage", symbol: "chart.pie.fill", color: .orange)
+                        .tag(AppSection.diskUsage)
+                }
+                Section("Records") {
+                    SidebarRow(title: "History", symbol: "clock.fill", color: .gray)
+                        .badge(state.history.count)
+                        .tag(AppSection.history)
+                    SidebarRow(title: "Quarantine", symbol: "archivebox.fill", color: .purple)
+                        .badge(state.quarantined.count)
+                        .tag(AppSection.quarantine)
+                }
             }
-            .navigationSplitViewColumnWidth(min: 150, ideal: 170, max: 220)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 190, max: 240)
             .onChange(of: state.selectedSection) { _, newValue in
                 // Clicking empty sidebar space deselects; keep a section selected.
                 if newValue == nil { state.selectedSection = .scan }
@@ -77,6 +83,19 @@ struct ContentView: View {
                     DropOverlay(isScanning: state.selectedSection == .diskUsage ? state.diskUsage.isScanning : state.isScanning,
                                 uninstallMode: state.selectedSection == .uninstall,
                                 measureMode: state.selectedSection == .diskUsage)
+                }
+            }
+        }
+        .toolbar {
+            // Cancel is always at hand while a scan runs, whatever section is open.
+            if state.isScanning {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        state.cancelScan()
+                    } label: {
+                        Label("Cancel Scan", systemImage: "xmark.circle")
+                    }
+                    .help("Stop the scan")
                 }
             }
         }
@@ -151,6 +170,20 @@ struct ContentView: View {
             Button("OK") {}
         } message: { alert in
             Text(alert.message)
+        }
+    }
+}
+
+struct SidebarRow: View {
+    let title: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        Label {
+            Text(title)
+        } icon: {
+            IconTile(symbol: symbol, color: color, size: 20)
         }
     }
 }
