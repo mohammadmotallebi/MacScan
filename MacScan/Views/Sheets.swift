@@ -2,14 +2,27 @@ import MacScanCore
 import SwiftUI
 
 struct FullDiskAccessSteps: View {
+    private let steps: [LocalizedStringKey] = [
+        "Open **System Settings › Privacy & Security › Full Disk Access**.",
+        "Click **+**, choose **MacScan** (or drag MacScan.app into the list).",
+        "Turn the switch next to MacScan **on**.",
+        "Quit and reopen MacScan so the change takes effect.",
+    ]
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("1. Open **System Settings › Privacy & Security › Full Disk Access**.")
-            Text("2. Click **+**, choose **MacScan** (or drag MacScan.app into the list).")
-            Text("3. Turn the switch next to MacScan **on**.")
-            Text("4. Quit and reopen MacScan so the change takes effect.")
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { i, step in
+                HStack(spacing: 10) {
+                    Text("\(i + 1)")
+                        .font(.callout.weight(.bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(Color.pink.gradient, in: Circle())
+                    Text(step).font(.callout)
+                    Spacer(minLength: 0)
+                }
+            }
         }
-        .font(.callout)
     }
 }
 
@@ -19,18 +32,15 @@ struct FullDiskAccessSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("MacScan needs Full Disk Access", systemImage: "lock.shield")
-                .font(.title2.weight(.semibold))
-            Text(paths.isEmpty
-                 ? "macOS protects some folders (Mail, Messages, Safari, other apps' data). Without Full Disk Access MacScan can't read them."
-                 : "macOS refused access to \(paths.count) location(s). Folders like Mail, Messages, Safari and other apps' containers are protected and can only be scanned with Full Disk Access.")
-                .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(
+                symbol: "lock.shield.fill", color: .pink, title: "MacScan needs Full Disk Access",
+                subtitle: paths.isEmpty
+                    ? "macOS protects some folders (Mail, Messages, Safari, other apps' data). Without Full Disk Access MacScan can't read them."
+                    : "macOS refused access to \(paths.count) location(s). Folders like Mail, Messages, Safari and other apps' data can only be scanned with Full Disk Access.")
 
-            GroupBox {
-                FullDiskAccessSteps()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(6)
-            }
+            FullDiskAccessSteps()
+                .padding(14)
+                .glassCard(radius: 16)
 
             HStack(spacing: 6) {
                 Image(systemName: "info.circle").foregroundStyle(.secondary)
@@ -59,13 +69,16 @@ struct FullDiskAccessSheet: View {
                 Button("Reveal MacScan in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
                 }
+                .buttonStyle(.glass)
                 Spacer()
                 Button("Not Now") { dismiss() }
+                    .buttonStyle(.glass)
                     .keyboardShortcut(.cancelAction)
                 Button("Open System Settings") {
                     FullDiskAccess.openSettings()
                     dismiss()
                 }
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -88,22 +101,23 @@ struct InstallHelpSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Label("\(engine.title) is not installed", systemImage: "shippingbox")
-                .font(.title2.weight(.semibold))
-            Text("MacScan uses the free, open-source \(engine.title) command-line tool. Other engines keep working without it.")
-                .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(symbol: "shippingbox.fill", color: .brown, title: "\(engine.title) is not installed",
+                        subtitle: "MacScan uses the free, open-source \(engine.title) command-line tool. Other engines keep working without it.")
             Text("Install it with Homebrew in Terminal:")
-            HStack {
-                Text(command)
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
-                Button("Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
+            CodeBox {
+                HStack {
+                    Text("$ ").foregroundStyle(.green) + Text(command)
+                    Spacer()
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(command, forType: .string)
+                    } label: {
+                        Label("Copy", systemImage: "doc.on.doc")
+                    }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
                 }
+                .textSelection(.enabled)
             }
             if engine == .clamav {
                 Text("Then click **Update virus database** in MacScan to download the signatures (about 300 MB). MacScan never updates automatically.")
@@ -115,7 +129,7 @@ struct InstallHelpSheet: View {
             Text(text).hidden().frame(height: 0)
             HStack {
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
@@ -130,15 +144,10 @@ struct FreshclamSheet: View {
     var body: some View {
         let run = state.freshclam ?? FreshclamRun(running: false)
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("Update virus database", systemImage: "arrow.down.circle")
-                    .font(.title2.weight(.semibold))
-                Spacer()
-                if run.running { ProgressView().controlSize(.small) }
-            }
-            Text("Running freshclam to download the latest ClamAV signatures into MacScan's own folder.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            SheetHeader(symbol: "arrow.down.circle.fill", color: run.succeeded ? .green : run.error != nil ? .orange : .blue,
+                        title: run.running ? "Updating virus database…" : run.succeeded ? "Virus database updated" : "Update virus database",
+                        subtitle: "freshclam downloads the latest ClamAV signatures into MacScan's own folder.",
+                        isBusy: run.running)
 
             ScrollViewReader { proxy in
                 ScrollView {
@@ -151,8 +160,9 @@ struct FreshclamSheet: View {
                     .textSelection(.enabled)
                     .padding(8)
                 }
+                .foregroundStyle(.white.opacity(0.85))
                 .frame(height: 240)
-                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+                .background(Color.black.opacity(0.78), in: .rect(cornerRadius: 12))
                 .onChange(of: run.lines.count) { _, count in
                     if count > 0 { proxy.scrollTo(count - 1, anchor: .bottom) }
                 }
@@ -167,10 +177,10 @@ struct FreshclamSheet: View {
             HStack {
                 Spacer()
                 if run.running {
-                    Button("Cancel", role: .cancel) { state.cancelDatabaseUpdate() }
-                    Button("Hide") { dismiss() }
+                    Button("Cancel", role: .cancel) { state.cancelDatabaseUpdate() }.buttonStyle(.glass)
+                    Button("Hide") { dismiss() }.buttonStyle(.glass)
                 } else {
-                    Button("Close") { dismiss() }.keyboardShortcut(.defaultAction)
+                    Button("Close") { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
                 }
             }
         }

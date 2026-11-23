@@ -350,14 +350,21 @@ struct UninstallReportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(report.failures.isEmpty ? "\(report.appName) was uninstalled" : "\(report.appName) was partly uninstalled",
-                  systemImage: report.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(report.failures.isEmpty ? .green : .orange)
-
-            Text([report.movedCount > 0 ? "Moved \(report.movedCount) item\(report.movedCount == 1 ? "" : "s") to the Trash" : nil,
-                  report.deletedCount > 0 ? "Deleted \(report.deletedCount) item\(report.deletedCount == 1 ? "" : "s") permanently" : nil]
-                .compactMap { $0 }.joined(separator: " · ") + " (\(report.freedBytes.formatted(.byteCount(style: .file))))")
+            SheetHeader(symbol: report.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                        color: report.failures.isEmpty ? .green : .orange,
+                        title: report.failures.isEmpty ? "\(report.appName) was uninstalled" : "\(report.appName) was partly uninstalled",
+                        subtitle: "\(report.freedBytes.formatted(.byteCount(style: .file))) removed.")
+            HStack(spacing: 6) {
+                if report.movedCount > 0 {
+                    CountChip(symbol: "trash.fill", text: "\(report.movedCount) moved to Trash", color: .green)
+                }
+                if report.deletedCount > 0 {
+                    CountChip(symbol: "xmark.bin.fill", text: "\(report.deletedCount) deleted", color: .green)
+                }
+                if !report.failures.isEmpty {
+                    CountChip(symbol: "exclamationmark.triangle.fill", text: "\(report.failures.count) not removed", color: .red)
+                }
+            }
             if !report.quitProcesses.isEmpty {
                 Text("Quit: \(Set(report.quitProcesses).sorted().joined(separator: ", "))").font(.callout).foregroundStyle(.secondary)
             }
@@ -406,11 +413,13 @@ struct UninstallReportSheet: View {
                 Button("Open Trash") {
                     NSWorkspace.shared.open(AppPaths.home.appendingPathComponent(".Trash"))
                 }
+                .buttonStyle(.glass)
                 Button("Login Items Settings") {
                     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension")!)
                 }
+                .buttonStyle(.glass)
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                Button("Done") { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
             }
         }
         .padding(24)
@@ -438,10 +447,8 @@ struct RemovedAppSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Find Leftovers of a Removed App").font(.title3.weight(.semibold))
-            Text("Deleted apps often leave settings, caches, helpers and background items behind. Enter what you know about the app, and MacScan lists those files for you to review. Nothing is removed until you confirm.")
-                .font(.callout).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            SheetHeader(symbol: "magnifyingglass", color: .red, title: "Find leftovers of a removed app",
+                        subtitle: "Deleted apps often leave settings, caches, helpers and background items behind. Enter what you know about the app, and MacScan lists those files for you to review. Nothing is removed until you confirm.")
             Form {
                 TextField("Bundle ID", text: $bundleID, prompt: Text("com.vendor.AppName"))
                 TextField("Name", text: $name, prompt: Text("App name, e.g. CleanMyMac_5"))
@@ -455,7 +462,7 @@ struct RemovedAppSheet: View {
             }
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) { dismiss() }.buttonStyle(.glass).keyboardShortcut(.cancelAction)
                 Button("Find Leftovers") {
                     if let message = state.uninstall.addRemovedApp(bundleID: bundleID, name: name) {
                         error = message
@@ -463,6 +470,7 @@ struct RemovedAppSheet: View {
                         dismiss()
                     }
                 }
+                .buttonStyle(.glassProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(bundleID.trimmingCharacters(in: .whitespaces).isEmpty && name.trimmingCharacters(in: .whitespaces).isEmpty)
             }

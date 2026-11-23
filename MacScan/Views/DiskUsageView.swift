@@ -510,22 +510,21 @@ struct CleanupSheet: View {
                 CleanupSummaryView(summary: summary)
             } else if let progress = model.cleanupProgress {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Cleaning Up…").font(.title2.weight(.semibold))
+                    SheetHeader(symbol: "sparkles", color: .green, title: "Cleaning up…", isBusy: true)
                     ProgressView(value: Double(progress.done), total: Double(max(progress.total, 1)))
                     Text(progress.current.isEmpty ? "Finishing…" : "\(progress.done + 1) of \(progress.total): \(progress.current)")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
             } else {
-                Text("Clean Up").font(.title2.weight(.semibold))
-                Text("Ticked items move to the Trash, where you can restore them until you empty it. \"Safe to clean\" items are rebuilt or re-downloaded automatically; check \"Review first\" items before ticking them.")
-                    .font(.callout).foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                SheetHeader(symbol: "sparkles", color: .green, title: "Clean Up",
+                            subtitle: "Ticked items move to the Trash, where you can restore them until you empty it. \"Safe to clean\" items are rebuilt or downloaded again on their own; check \"Review first\" items before ticking them.")
                 HStack {
                     Button("Safe Items Only") { model.selectForCleanup(.safe) }
                     Button("All") { model.selectForCleanup(nil) }
                     Button("None") { model.cleanupSelection = [] }
                 }
+                .buttonStyle(.glass)
                 .controlSize(.small)
                 List {
                     ForEach(CleanupPriority.allCases, id: \.self) { priority in
@@ -556,12 +555,12 @@ struct CleanupSheet: View {
                 }
                 Spacer()
                 if model.cleanupSummary != nil {
-                    Button("Open Trash") { NSWorkspace.shared.open(AppPaths.home.appendingPathComponent(".Trash")) }
-                    Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+                    Button("Open Trash") { NSWorkspace.shared.open(AppPaths.home.appendingPathComponent(".Trash")) }.buttonStyle(.glass)
+                    Button("Done") { dismiss() }.buttonStyle(.glassProminent).keyboardShortcut(.defaultAction)
                 } else if model.cleanupProgress == nil {
-                    Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                    Button("Cancel", role: .cancel) { dismiss() }.buttonStyle(.glass).keyboardShortcut(.cancelAction)
                     Button("Move to Trash…", role: .destructive) { confirming = true }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .tint(.red)
                         .disabled(selected.isEmpty)
                 }
@@ -622,11 +621,19 @@ struct CleanupSummaryView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(summary.failures.isEmpty ? "Cleaned up" : "Partly cleaned up",
-                  systemImage: summary.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                .font(.title2.weight(.semibold))
-                .foregroundStyle(summary.failures.isEmpty ? .green : .orange)
-            Text("Moved \(summary.freed.formatted(.byteCount(style: .file))) to the Trash (\(summary.cleaned) item\(summary.cleaned == 1 ? "" : "s") fully cleaned). Empty the Trash to free the space.")
+            SheetHeader(symbol: summary.failures.isEmpty ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                        color: summary.failures.isEmpty ? .green : .orange,
+                        title: summary.failures.isEmpty ? "Cleaned up" : "Partly cleaned up")
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(summary.freed.formatted(.byteCount(style: .file)))
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundStyle(.green.gradient)
+                Text("moved to the Trash")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+            }
+            Text("\(summary.cleaned) item\(summary.cleaned == 1 ? "" : "s") fully cleaned. Empty the Trash to free the space.")
+                .foregroundStyle(.secondary)
             if !summary.failures.isEmpty {
                 Text("Not moved (\(summary.failures.count))").font(.headline)
                 ScrollView {

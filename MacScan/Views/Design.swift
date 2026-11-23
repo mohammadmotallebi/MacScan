@@ -247,6 +247,45 @@ struct SectionEmptyState: View {
     }
 }
 
+/// The top of a sheet: a colored icon, a title and one line of summary.
+struct SheetHeader: View {
+    let symbol: String
+    let color: Color
+    let title: String
+    var subtitle: String?
+    var isBusy = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            IconTile(symbol: symbol, color: color, size: 46)
+                .symbolEffect(.pulse, options: .repeating, isActive: isBusy)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.system(size: 20, weight: .bold, design: .rounded))
+                if let subtitle {
+                    Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            if isBusy { ProgressView().controlSize(.small) }
+        }
+    }
+}
+
+/// A dark box for Terminal commands and tool output.
+struct CodeBox<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        content
+            .font(.callout.monospaced())
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.black.opacity(0.78), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08)))
+    }
+}
+
 /// A plain note line at the bottom of a section.
 struct SectionFootnote: View {
     let text: String

@@ -1,23 +1,91 @@
 import MacScanCore
 import SwiftUI
 
+/// Settings, laid out like System Settings: a sidebar of colored icons and a grouped form.
 struct SettingsView: View {
-    var body: some View {
-        TabView {
-            GeneralSettingsView()
-                .tabItem { Label("General", systemImage: "gearshape") }
-            EngineSettingsView()
-                .tabItem { Label("Engines", systemImage: "cpu") }
-            BackgroundSettingsView()
-                .tabItem { Label("Background", systemImage: "clock.arrow.circlepath") }
-            VirusTotalSettingsView()
-                .tabItem { Label("VirusTotal", systemImage: "network") }
-            PrivacySettingsView()
-                .tabItem { Label("Privacy", systemImage: "lock.shield") }
-            IgnoredSettingsView()
-                .tabItem { Label("Ignored", systemImage: "eye.slash") }
+    enum Pane: String, CaseIterable, Identifiable {
+        case general = "General", engines = "Engines", background = "Background"
+        case virusTotal = "VirusTotal", privacy = "Privacy", ignored = "Ignored"
+
+        var id: String { rawValue }
+
+        var symbol: String {
+            switch self {
+            case .general: "gearshape.fill"
+            case .engines: "cpu.fill"
+            case .background: "clock.arrow.circlepath"
+            case .virusTotal: "globe"
+            case .privacy: "hand.raised.fill"
+            case .ignored: "eye.slash.fill"
+            }
         }
-        .frame(width: 640, height: 480)
+
+        var color: Color {
+            switch self {
+            case .general: .gray
+            case .engines: .blue
+            case .background: .orange
+            case .virusTotal: .indigo
+            case .privacy: .pink
+            case .ignored: .teal
+            }
+        }
+    }
+
+    @State private var pane: Pane = .general
+
+    var body: some View {
+        NavigationSplitView {
+            List(Pane.allCases, selection: $pane) { pane in
+                Label {
+                    Text(pane.rawValue)
+                } icon: {
+                    IconTile(symbol: pane.symbol, color: pane.color, size: 22)
+                }
+                .tag(pane)
+            }
+            .navigationSplitViewColumnWidth(170)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
+            Group {
+                switch pane {
+                case .general: GeneralSettingsView()
+                case .engines: EngineSettingsView()
+                case .background: BackgroundSettingsView()
+                case .virusTotal: VirusTotalSettingsView()
+                case .privacy: PrivacySettingsView()
+                case .ignored: IgnoredSettingsView()
+                }
+            }
+            .navigationTitle(pane.rawValue)
+        }
+        .frame(width: 780, height: 540)
+    }
+}
+
+/// A form section title with a small colored icon.
+struct SettingsHeader: View {
+    let title: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        Label {
+            Text(title).font(.headline).foregroundStyle(.primary)
+        } icon: {
+            IconTile(symbol: symbol, color: color, size: 20)
+        }
+        .textCase(nil)
+    }
+}
+
+/// A short grey hint under a setting.
+struct SettingsHint: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -30,29 +98,29 @@ struct GeneralSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
-            Section("Menu bar") {
+            Section {
                 Toggle("Show MacScan in the menu bar", isOn: $state.settings.showInMenuBar)
-                Text("MacScan's icon shows the last Full Check, and its menu can start one. While this is on, closing the window keeps MacScan running in the menu bar, and only Quit MacScan (in that menu, or ⌘Q) closes it.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("MacScan's icon shows the last Full Check, and its menu can start one. While this is on, closing the window keeps MacScan running in the menu bar, and only Quit MacScan (in that menu, or ⌘Q) closes it.")
+            } header: {
+                SettingsHeader(title: "Menu bar", symbol: "menubar.rectangle", color: .blue)
             }
 
-            Section("Limits") {
+            Section {
                 HStack {
                     TextField("Maximum file size", value: $state.settings.maxFileSizeMB, format: .number)
                         .frame(width: 220)
                     Stepper("MB", value: $state.settings.maxFileSizeMB, in: 1...4096, step: 25)
                 }
-                Text("Larger files are skipped and counted in the scan details.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("Larger files are skipped and counted in the scan details.")
                 Toggle("Skip symbolic links", isOn: $state.settings.skipSymlinks)
-                Text("When off, links to files are scanned at their destination. Linked folders are never followed.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("When off, links to files are scanned at their destination. Linked folders are never followed.")
                 Toggle("Applications scan: only executables and scripts (faster)", isOn: $state.settings.appScanExecutablesOnly)
-                Text("When off, every file inside each .app bundle is scanned (images, resources, …).")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("When off, every file inside each .app bundle is scanned (images, resources, …).")
+            } header: {
+                SettingsHeader(title: "Limits", symbol: "gauge.with.dots.needle.50percent", color: .orange)
             }
 
-            Section("Excluded paths") {
+            Section {
                 List(selection: $selectedExclusion) {
                     ForEach(state.settings.excludedPaths, id: \.self) { path in
                         Text(path).font(.callout.monospaced()).tag(path)
@@ -69,6 +137,8 @@ struct GeneralSettingsView: View {
                     }
                     .disabled(selectedExclusion == nil)
                 }
+            } header: {
+                SettingsHeader(title: "Excluded paths", symbol: "nosign", color: .red)
             }
         }
         .formStyle(.grouped)
@@ -95,22 +165,25 @@ struct EngineSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
-            Section("Enabled engines") {
-                Toggle("ClamAV signature scanning", isOn: $state.settings.enableClamAV)
-                Toggle("YARA rules", isOn: $state.settings.enableYara)
-                Toggle("App integrity (codesign, Gatekeeper, quarantine)", isOn: $state.settings.enableIntegrity)
+            Section {
+                engineToggle("ClamAV signature scanning", .clamav, $state.settings.enableClamAV)
+                engineToggle("YARA rules", .yara, $state.settings.enableYara)
+                engineToggle("App integrity (codesign, Gatekeeper, quarantine)", .integrity, $state.settings.enableIntegrity)
+            } header: {
+                SettingsHeader(title: "Engines", symbol: "cpu.fill", color: .blue)
             }
 
-            Section("Tool locations") {
+            Section {
                 ToolPathField(title: "clamscan", tool: .clamscan, value: optionalBinding(\.clamscanPath))
                 ToolPathField(title: "freshclam", tool: .freshclam, value: optionalBinding(\.freshclamPath))
                 ToolPathField(title: "yara", tool: .yara, value: optionalBinding(\.yaraPath))
                 ToolPathField(title: "yarac", tool: .yarac, value: optionalBinding(\.yaracPath))
-                Text("Leave empty to auto-detect Homebrew locations (/opt/homebrew/bin, /usr/local/bin).")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("Leave empty to auto-detect Homebrew locations (/opt/homebrew/bin, /usr/local/bin).")
+            } header: {
+                SettingsHeader(title: "Tool locations", symbol: "wrench.and.screwdriver.fill", color: .gray)
             }
 
-            Section("ClamAV database") {
+            Section {
                 LabeledContent("In use") {
                     Text(ClamAVDatabase.resolve(override: state.settings.clamDatabasePath).path)
                         .font(.caption.monospaced())
@@ -122,9 +195,11 @@ struct EngineSettingsView: View {
                         if let url = chooseFolder() { state.settings.clamDatabasePath = url.path }
                     }
                 }
+            } header: {
+                SettingsHeader(title: "ClamAV database", symbol: "cylinder.split.1x2.fill", color: .green)
             }
 
-            Section("YARA rules") {
+            Section {
                 LabeledContent("Rules folder") {
                     Text(state.settings.yaraRulesFolder ?? "Bundled sample rules")
                         .font(.caption.monospaced())
@@ -148,9 +223,25 @@ struct EngineSettingsView: View {
                 Toggle("Also use Apple's XProtect rules", isOn: $state.settings.useXProtectRules)
                 Text("macOS ships its own malware YARA rules (XProtect) and keeps them updated. MacScan reads them in place\(YaraEngine.xprotectRuleCount().map { " — currently \($0) rules" } ?? ""). A match is reported as a Threat.")
                     .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                SettingsHeader(title: "YARA rules", symbol: "list.bullet.rectangle.fill", color: .purple)
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func engineToggle(_ title: String, _ engine: EngineID, _ isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 8) {
+                Text(title)
+                switch state.engineStatus[engine] {
+                case .available: CountChip(symbol: "checkmark.circle.fill", text: "Ready", color: .green)
+                case .notInstalled: CountChip(symbol: "xmark.circle.fill", text: "Not installed", color: .red)
+                case .needsSetup: CountChip(symbol: "exclamationmark.circle.fill", text: "Needs setup", color: .orange)
+                case .disabled, nil: EmptyView()
+                }
+            }
+        }
     }
 
     private func optionalBinding(_ keyPath: WritableKeyPath<ScanSettings, String?>) -> Binding<String> {
@@ -206,7 +297,7 @@ struct VirusTotalSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
-            Section("API key") {
+            Section {
                 if state.hasVirusTotalKey {
                     LabeledContent("Status") {
                         Label("Key saved in your login keychain", systemImage: "key.fill").foregroundStyle(.green)
@@ -222,8 +313,10 @@ struct VirusTotalSettingsView: View {
                 }
                 Link("Get a free API key at virustotal.com", destination: URL(string: "https://www.virustotal.com/gui/my-apikey")!)
                     .font(.caption)
+            } header: {
+                SettingsHeader(title: "API key", symbol: "key.fill", color: .yellow)
             }
-            Section("Lookups") {
+            Section {
                 Toggle("Automatically look up flagged files after each scan", isOn: $state.settings.vtAutoLookupFlagged)
                     .disabled(!state.hasVirusTotalKey)
                 Text("""
@@ -232,6 +325,8 @@ struct VirusTotalSettingsView: View {
                 You can also look up any single result from its context menu.
                 """)
                 .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                SettingsHeader(title: "Lookups", symbol: "magnifyingglass", color: .indigo)
             }
         }
         .formStyle(.grouped)
@@ -261,7 +356,7 @@ struct BackgroundSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
-            Section("Scheduled scan") {
+            Section {
                 Toggle("Scan on a schedule", isOn: $state.settings.scheduledScanEnabled)
                 if state.settings.scheduledScanEnabled {
                     Picker("Repeat", selection: $state.settings.scheduleFrequency) {
@@ -282,15 +377,18 @@ struct BackgroundSettingsView: View {
                      ? "Runs a Full Check (plus your scan folders) and tells you what changed since the last one: new apps, new permissions, settings that got worse. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes."
                      : "Scans Applications, Startup Items and your scan folders. It runs while you're logged in; a scan missed while the Mac was asleep runs after it wakes.")
                     .font(.caption).foregroundStyle(.secondary)
+            } header: {
+                SettingsHeader(title: "Scheduled scan", symbol: "calendar.badge.clock", color: .orange)
             }
 
-            Section("Downloads") {
+            Section {
                 Toggle("Scan new downloads", isOn: $state.settings.watchDownloads)
-                Text("When something new arrives in your Downloads folder, MacScan scans just that item. Items that are already there are not scanned.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("When something new arrives in your Downloads folder, MacScan scans just that item. Items that are already there are not scanned.")
+            } header: {
+                SettingsHeader(title: "Downloads", symbol: "arrow.down.circle.fill", color: .blue)
             }
 
-            Section("Notifications") {
+            Section {
                 LabeledContent("Status") {
                     switch state.notificationPermission {
                     case .allowed: Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
@@ -309,17 +407,19 @@ struct BackgroundSettingsView: View {
                         }
                     }
                 }
-                Text("A notification appears only when a background scan finds something new. Every background scan is also saved in History. MacScan never moves or deletes anything on its own.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("A notification appears only when a background scan finds something new. Every background scan is also saved in History. MacScan never moves or deletes anything on its own.")
+            } header: {
+                SettingsHeader(title: "Notifications", symbol: "bell.badge.fill", color: .red)
             }
 
-            Section("How it works") {
+            Section {
                 if let error = state.backgroundError {
                     Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.callout)
                     Button("Try Again") { state.syncBackgroundAgent() }
                 }
-                Text("macOS starts MacScan for each background scan and MacScan exits when the scan ends, so nothing stays running in between. While either option is on, MacScan appears in System Settings › General › Login Items and in its own Startup Items scan. Turning both off removes its launch agents. Background scans never run as administrator.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsHint("macOS starts MacScan for each background scan and MacScan exits when the scan ends, so nothing stays running in between. While either option is on, MacScan appears in System Settings › General › Login Items and in its own Startup Items scan. Turning both off removes its launch agents. Background scans never run as administrator.")
+            } header: {
+                SettingsHeader(title: "How it works", symbol: "info.circle.fill", color: .gray)
             }
         }
         .formStyle(.grouped)
@@ -333,7 +433,7 @@ struct PrivacySettingsView: View {
 
     var body: some View {
         Form {
-            Section("Full Disk Access") {
+            Section {
                 LabeledContent("Status") {
                     if state.fullDiskAccessLikelyGranted {
                         Label("Granted", systemImage: "checkmark.shield.fill").foregroundStyle(.green)
@@ -346,16 +446,20 @@ struct PrivacySettingsView: View {
                     Button("Open Full Disk Access Settings") { FullDiskAccess.openSettings() }
                     Button("Check Again") { state.refreshEngineStatus() }
                 }
+            } header: {
+                SettingsHeader(title: "Full Disk Access", symbol: "lock.shield.fill", color: .pink)
             }
-            Section("Logs") {
+            Section {
                 LabeledContent("Log file") {
                     Text(FileLogger.shared.fileURL.path).font(.caption.monospaced()).textSelection(.enabled)
                 }
                 Button("Show Log in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([FileLogger.shared.fileURL])
                 }
+            } header: {
+                SettingsHeader(title: "Logs", symbol: "doc.text.fill", color: .gray)
             }
-            Section("Background activity") {
+            Section {
                 if state.settings.backgroundScansEnabled {
                     Text("Background scans are on (Settings › Background). macOS starts MacScan for each scan through MacScan's own launch agent, and MacScan exits when the scan ends. Nothing else runs in the background: no daemons, menu bar helpers or extensions.")
                         .font(.callout)
@@ -363,6 +467,8 @@ struct PrivacySettingsView: View {
                     Text("MacScan has no launch agents, daemons, login items, menu bar helpers or extensions. When you quit it, every scan and helper process stops. Scheduled scans and scanning new downloads are optional and off (Settings › Background).")
                         .font(.callout)
                 }
+            } header: {
+                SettingsHeader(title: "Background activity", symbol: "moon.zzz.fill", color: .indigo)
             }
         }
         .formStyle(.grouped)
@@ -375,21 +481,28 @@ struct IgnoredSettingsView: View {
     @Environment(AppState.self) private var state
 
     var body: some View {
-        VStack(alignment: .leading) {
-            Text("Ignored results are hidden from future scans until the file's contents change.")
-                .font(.callout).foregroundStyle(.secondary)
-            Table(state.ignoreList.entries) {
-                TableColumn("Path") { e in Text(e.path).lineLimit(1).truncationMode(.middle).help(e.path) }
-                TableColumn("Engine") { e in Text(e.engine.title) }.width(90)
-                TableColumn("Reason") { e in Text(e.reason).lineLimit(1).help(e.reason) }
-                TableColumn("") { e in
-                    Button("Unignore") { state.unignore(e) }.controlSize(.small)
-                }
-                .width(80)
-            }
-            .overlay {
-                if state.ignoreList.entries.isEmpty {
-                    ContentUnavailableView("Nothing ignored", systemImage: "eye")
+        VStack(alignment: .leading, spacing: 10) {
+            if state.ignoreList.entries.isEmpty {
+                SectionEmptyState(symbol: "eye.slash.fill", color: .teal, title: "Nothing ignored",
+                                  message: "Choose Ignore on a scan result to hide it from future scans. It comes back if the file's contents change.")
+            } else {
+                Text("Ignored results are hidden from future scans until the file's contents change.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Table(state.ignoreList.entries) {
+                    TableColumn("Path") { e in
+                        HStack(spacing: 6) {
+                            FileIcon(path: e.path, size: 18)
+                            Text(e.path).lineLimit(1).truncationMode(.middle).help(e.path)
+                        }
+                    }
+                    TableColumn("Engine") { e in Text(e.engine.title) }.width(90)
+                    TableColumn("Reason") { e in Text(e.reason).lineLimit(1).help(e.reason) }
+                    TableColumn("") { e in
+                        Button("Unignore") { state.unignore(e) }
+                            .buttonStyle(.glass)
+                            .controlSize(.small)
+                    }
+                    .width(90)
                 }
             }
         }
