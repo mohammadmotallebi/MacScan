@@ -123,6 +123,11 @@ public struct BackgroundAgent: Sendable {
         return job
     }
 
+    /// True when launchd has the agent loaded.
+    public func isLoaded(_ trigger: ScanTrigger) async -> Bool {
+        await launchctl.run(["print", "\(domain)/\(Self.label(for: trigger))"]) == 0
+    }
+
     /// True when the agent's plist is installed.
     public func isInstalled(_ trigger: ScanTrigger) -> Bool {
         FileManager.default.fileExists(atPath: plistURL(for: trigger).path)

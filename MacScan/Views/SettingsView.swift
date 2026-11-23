@@ -356,6 +356,8 @@ struct BackgroundSettingsView: View {
     var body: some View {
         @Bindable var state = state
         Form {
+            BackgroundStatusSection()
+
             Section {
                 Toggle("Scan on a schedule", isOn: $state.settings.scheduledScanEnabled)
                 if state.settings.scheduledScanEnabled {
@@ -527,5 +529,134 @@ struct IgnoredSettingsView: View {
             }
         }
         .padding()
+    }
+}
+
+// MARK: - Background status
+
+/// One row per background agent: on or off, loaded or not, when it last ran and what it found.
+struct BackgroundStatusSection: View {
+    @Environment(AppState.self) private var state
+    @State private var runs: [ScanTrigger: BackgroundRunStatus] = [:]
+    @State private var loaded: [ScanTrigger: Bool] = [:]
+
+    var body: some View {
+        Section {
+            ForEach(ScanTrigger.allCases, id: \.self) { trigger in
+                row(trigger)
+            }
+        } header: {
+            HStack {
+                SettingsHeader(title: "Status", symbol: "waveform.path.ecg", color: .green)
+                Spacer()
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Check again")
+            }
+        }
+        .task(id: state.settings) { await refresh() }
+        .onChange(of: state.history.first?.id) { Task { await refresh() } }
+    }
+
+    private func refresh() async {
+        runs = BackgroundStatusStore().load()
+        guard let executable = Bundle.main.executableURL else { return }
+        let agent = BackgroundAgent(executable: executable)
+        var result: [ScanTrigger: Bool] = [:]
+        for trigger in ScanTrigger.allCases { result[trigger] = await agent.isLoaded(trigger) }
+        loaded = result
+    }
+
+    private func isOn(_ trigger: ScanTrigger) -> Bool {
+        switch trigger {
+        case .scheduled: state.settings.scheduledScanEnabled
+        case .downloads: state.settings.watchDownloads
+        case .startupItems: state.settings.watchStartupItems
+        case .newApps: state.settings.watchNewApps
+        }
+    }
+
+    private func name(_ trigger: ScanTrigger) -> String {
+        switch trigger {
+        case .scheduled: "Scheduled scan"
+        case .downloads: "New downloads"
+        case .startupItems: "Startup items"
+        case .newApps: "New apps"
+        }
+    }
+
+    private func color(_ trigger: ScanTrigger) -> Color {
+        switch trigger {
+        case .scheduled: .orange
+        case .downloads: .blue
+        case .startupItems: .red
+        case .newApps: .purple
+        }
+    }
+
+    @ViewBuilder
+    private func row(_ trigger: ScanTrigger) -> some View {
+        let on = isOn(trigger)
+        let isLoaded = loaded[trigger]
+        HStack(alignment: .top, spacing: 10) {
+            IconTile(symbol: trigger.symbol, color: on ? color(trigger) : .gray, size: 26)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(name(trigger)).font(.body.weight(.medium))
+                    if !on {
+                        CountChip(symbol: "minus.circle", text: "Off", color: .secondary, dimmed: true)
+                    } else if isLoaded == false {
+                        CountChip(symbol: "exclamationmark.triangle.fill", text: "Not loaded", color: .orange)
+                    } else if isLoaded == true {
+                        CountChip(symbol: "checkmark.circle.fill", text: "Active", color: .green)
+                    }
+                }
+                if let run = runs[trigger] {
+                    Text("Last run \(run.date.formatted(.relative(presentation: .named))) · \(run.summary)")
+                        .font(.caption)
+                        .foregroundStyle(run.noteworthy ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+                        .lineLimit(2)
+                } else if on {
+                    Text("Hasn't run yet").font(.caption).foregroundStyle(.secondary)
+                }
+                if on {
+                    Text(nextLine(trigger)).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer(minLength: 8)
+            if on, isLoaded == false {
+                Button("Fix") {
+                    state.syncBackgroundAgent()
+                    Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        await refresh()
+                    }
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.small)
+                .help("Install MacScan's agent for this again")
+            }
+            if let id = runs[trigger]?.sessionID, state.history.contains(where: { $0.id == id }) {
+                Button("Open") { state.showSession(id) }
+                    .buttonStyle(.glass)
+                    .controlSize(.small)
+                    .help("Show this scan in History")
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func nextLine(_ trigger: ScanTrigger) -> String {
+        guard trigger == .scheduled else { return "Next: when something changes" }
+        guard let next = BackgroundSchedule.nextRun(state.settings) else { return "" }
+        let time = next.formatted(date: .omitted, time: .shortened)
+        let cal = Calendar.current
+        if cal.isDateInToday(next) { return "Next: today at \(time)" }
+        if cal.isDateInTomorrow(next) { return "Next: tomorrow at \(time)" }
+        return "Next: \(next.formatted(.dateTime.weekday(.wide))) at \(time)"
     }
 }

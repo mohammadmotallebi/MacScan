@@ -418,6 +418,11 @@ The two live-protection watchers below are on by default.
   when you turned it on are not scanned, and unfinished downloads (`.crdownload`, `.download`, `.part`)
   wait until they are complete.
 
+**Status.** The top of *Settings › Background* shows each agent: Active, Off or Not loaded (with a Fix
+button that reinstalls MacScan's own agent), when it last ran and what it found ("Nothing new", "Scanned
+Zoom.app: no issues"), when the scheduled scan runs next, and an Open button for the last saved scan.
+Every run is noted in `background-status.json`, including quiet ones that aren't kept in History.
+
 How it works: MacScan installs its own per-user launch agents in `~/Library/LaunchAgents`
 (`com.local.MacScan.scheduled-scan.plist`, `com.local.MacScan.downloads-watcher.plist`,
 `com.local.MacScan.startup-watcher.plist`, `com.local.MacScan.apps-watcher.plist`). launchd starts the

@@ -314,6 +314,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         env.appSettleInterval = .milliseconds(20)
         env.startupSettle = .zero
         env.appTrackers = [DownloadsTracker(folder: dir.url.appendingPathComponent("Applications"), stateFile: dir.url.appendingPathComponent("apps-seen.json"))]
+        env.status = BackgroundStatusStore(file: dir.url.appendingPathComponent("status.json"))
         var fixture = Fixture(dir: dir, env: env)
         fixture.env.notifier = fixture.notifier
         return fixture
@@ -564,6 +565,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         env.settleTimeout = .seconds(5)
         env.startupSettle = .zero
         env.startupTracker = StartupChangeTracker(file: dir.url.appendingPathComponent("startup-baseline.json"))
+        env.status = BackgroundStatusStore(file: dir.url.appendingPathComponent("status.json"))
         return env
     }
 
@@ -639,5 +641,60 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         #expect((agent.job(for: .newApps, settings: settings)?["ProgramArguments"] as? [String])?.last == "new-apps")
         #expect(agent.job(for: .startupItems, settings: .noWatchers) == nil)
         #expect(BackgroundAgent.label(for: .startupItems) == "com.local.MacScan.startup-watcher")
+    }
+}
+
+@Suite struct BackgroundStatusTests {
+    @Test func runsAreRecordedEvenWhenNothingIsSaved() async throws {
+        let dir = try TempDir()
+        let store = BackgroundStatusStore(file: dir.url.appendingPathComponent("status.json"))
+        #expect(store.load().isEmpty)
+
+        let t = Date(timeIntervalSince1970: 1_000_000)
+        store.record(.startupItems, BackgroundRunStatus(date: t, summary: "Nothing new"))
+        store.record(.newApps, BackgroundRunStatus(date: t, summary: "Scanned Zoom.app: no issues", sessionID: UUID()))
+        let loaded = store.load()
+        #expect(loaded[.startupItems] == BackgroundRunStatus(date: t, summary: "Nothing new"))
+        #expect(loaded[.newApps]?.summary == "Scanned Zoom.app: no issues")
+        #expect(loaded[.scheduled] == nil)
+    }
+
+    @Test func statusLines() {
+        var settings = ScanSettings()
+        #expect(BackgroundScanWorker.status(for: .scheduled, sessions: [], settings: settings).summary == "Skipped: turned off")
+        #expect(BackgroundScanWorker.status(for: .newApps, sessions: [], settings: settings).summary == "Nothing new")
+
+        var session = ScanSession(targets: ["/Applications/Zoom.app"])
+        session.findings = [Finding(path: "/Applications/Zoom.app/x", severity: .warning, engine: .integrity, reason: "r")]
+        let status = BackgroundScanWorker.status(for: .newApps, sessions: [session], settings: settings)
+        #expect(status.summary == "Scanned Zoom.app: 1 warning")
+        #expect(status.sessionID == session.id && status.noteworthy)
+
+        settings.watchDownloads = true
+        let clean = ScanSession(targets: ["/Users/x/Downloads/a.zip", "/Users/x/Downloads/b.dmg", "/Users/x/Downloads/c.pkg"])
+        let line = BackgroundScanWorker.status(for: .downloads, sessions: [clean], settings: settings)
+        #expect(line.summary == "Scanned a.zip, b.dmg and 1 more: no issues" && !line.noteworthy)
+    }
+
+    @Test func nextScheduledRun() throws {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = try #require(TimeZone(identifier: "UTC"))
+        // Wednesday 2026-11-25 10:00 UTC.
+        let now = try #require(cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 10)))
+        var s = ScanSettings()
+        #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == nil)
+
+        s.scheduledScanEnabled = true
+        s.scheduleHour = 12
+        s.scheduleMinute = 30
+        #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 12, minute: 30)))
+        s.scheduleHour = 9
+        #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 26, hour: 9, minute: 30)))
+
+        s.scheduleFrequency = .weekly
+        s.scheduleWeekday = 1   // Monday
+        #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 30, hour: 9, minute: 30)))
+        s.scheduleWeekday = 7   // Sunday
+        #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 29, hour: 9, minute: 30)))
     }
 }

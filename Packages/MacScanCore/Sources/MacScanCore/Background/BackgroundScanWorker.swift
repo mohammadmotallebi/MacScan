@@ -43,6 +43,8 @@ public struct BackgroundScanEnvironment: Sendable {
     public var appSettleInterval: Duration = .seconds(10)
     /// Wait after a startup folder changes, so an installer can finish writing its items.
     public var startupSettle: Duration = .seconds(5)
+    /// Where each agent's last run is noted for Settings.
+    public var status = BackgroundStatusStore()
 
     public init(
         settings: ScanSettings,
@@ -158,12 +160,14 @@ public enum BackgroundScanWorker {
     /// Runs the scans for one trigger and returns their sessions (already saved to history).
     @discardableResult
     public static func run(_ trigger: ScanTrigger, environment env: BackgroundScanEnvironment) async -> [ScanSession] {
-        switch trigger {
+        let sessions = switch trigger {
         case .scheduled: await runScheduled(env)
         case .downloads: await runDownloads(env)
         case .startupItems: await runStartupWatch(env)
         case .newApps: await runNewApps(env)
         }
+        env.status.record(trigger, status(for: trigger, sessions: sessions, settings: env.settings))
+        return sessions
     }
 
     // MARK: - Scheduled scan

@@ -66,6 +66,11 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("fullcheck-baseline.json")
     }
 
+    /// When each background agent last ran and what it found.
+    public static var backgroundStatusFile: URL {
+        applicationSupport.appendingPathComponent("background-status.json")
+    }
+
     /// Apps already seen in one Applications folder (`name` keeps the two folders apart).
     public static func appsSeenFile(_ name: String) -> URL {
         applicationSupport.appendingPathComponent("apps-seen-\(name).json")
