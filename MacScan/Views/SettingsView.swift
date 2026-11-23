@@ -389,6 +389,17 @@ struct BackgroundSettingsView: View {
             }
 
             Section {
+                Toggle("Tell me when an app gets a sensitive permission", isOn: $state.settings.watchPermissions)
+                SettingsHint("While MacScan runs (it stays in the menu bar), it checks every 5 minutes whether an app got your camera, microphone, screen, keyboard or Full Disk Access, and sends a notification. MacScan only reads the list.")
+                if state.settings.watchPermissions && !state.fullDiskAccessLikelyGranted {
+                    Label("Needs Full Disk Access to read the permission list.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+            } header: {
+                SettingsHeader(title: "New permissions", symbol: "hand.raised.fill", color: .pink)
+            }
+
+            Section {
                 LabeledContent("Status") {
                     switch state.notificationPermission {
                     case .allowed: Label("Allowed", systemImage: "checkmark.circle.fill").foregroundStyle(.green)

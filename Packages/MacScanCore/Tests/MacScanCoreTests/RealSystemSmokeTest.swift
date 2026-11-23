@@ -98,3 +98,17 @@ func realFullCheckProbe() async throws {
     for f in session.findings where f.area == nil { out += "NO AREA | \(f.engine.title) | \(f.path) | unit \(f.unitPath)\n" }
     try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_FULLCHECK_PROBE"]!, atomically: true, encoding: .utf8)
 }
+
+// Opt-in: list apps that seem removed but left files in your Library (read-only):
+//   MACSCAN_REMOVED_PROBE=/tmp/macscan-removed.txt swift test --filter realRemovedAppsProbe
+@Test(.enabled(if: ProcessInfo.processInfo.environment["MACSCAN_REMOVED_PROBE"] != nil))
+func realRemovedAppsProbe() throws {
+    let start = ContinuousClock.now
+    let installed = (InstalledApp.listInstalled() + InstalledApp.listTrash()).flatMap(\.allBundleIDs)
+    let found = RemovedAppFinder(installedIDs: Set(installed)).find()
+    var out = "elapsed: \(ContinuousClock.now - start), installed IDs: \(installed.count), found: \(found.count)\n"
+    for c in found {
+        out += "\(c.bundleID) | \(ByteCountFormatter.string(fromByteCount: c.size, countStyle: .file)) | \(c.paths.map { ($0 as NSString).lastPathComponent == c.bundleID ? ($0 as NSString).deletingLastPathComponent.components(separatedBy: "/Library/").last! : ($0 as NSString).lastPathComponent }.joined(separator: ", "))\n"
+    }
+    try out.write(toFile: ProcessInfo.processInfo.environment["MACSCAN_REMOVED_PROBE"]!, atomically: true, encoding: .utf8)
+}

@@ -165,18 +165,20 @@ and its only program is the browser's `app_mode_loader`. Anything else is judged
 
 **Full Check** (⇧⌘F) is one scan of everything MacScan can check without you choosing a folder:
 Applications, Startup Items, Running Processes and Browser Extensions. It also reads the macOS
-security settings (see Security check) and the privacy permissions (see Privacy permissions). Your saved folders are not part of it; use **Scan Folders**.
+security settings (see Security check), the privacy permissions (see Privacy permissions) and takes a
+network snapshot (see Network). Your saved folders are not part of it; use **Scan Folders**.
 
 The result is a single list and a single History entry named "Full Check". Above the list there is
 one tile per area with its threats and warnings, plus a Security Settings tile ("12 of 13 pass") and a
-Privacy tile ("2 worth a look · 3 leftovers"). Click an area tile to show only that area's results;
-click it again to show everything. The Security Settings and Privacy tiles open their sections.
+Privacy tile ("2 worth a look · 3 leftovers") and a Network tile ("Nothing odd · 29 programs"). Click an
+area tile to show only that area's results; click it again to show everything. The Security Settings,
+Privacy and Network tiles open their sections.
 
 Under the tiles, **Since the last Full Check** lists what is different from the previous completed one:
 new apps, apps that gained a sensitive permission (Screen Recording, Accessibility, Full Disk Access, Input
 Monitoring, camera, microphone, Automation, App Management, Developer Tools), security or tampering checks
-that got worse or whose finding changed (a new proxy, DNS server, certificate…), and checks that are fixed
-now. The first Full Check only saves a starting point. A cancelled check is not compared and not saved, and
+that got worse or whose finding changed (a new proxy, DNS server, certificate…), programs that now accept
+connections from other computers (not macOS's own), and checks that are fixed now. The first Full Check only saves a starting point. A cancelled check is not compared and not saved, and
 permissions are only compared when they could be read. The starting point is kept in
 `fullcheck-baseline.json` in MacScan's folder.
 
@@ -387,6 +389,13 @@ Login Items & Extensions **while the app is still in the Trash**. To make them d
 - use the **In the Trash** group in the app list to finish off apps you've already moved to the Trash.
   Items already in the Trash are deleted permanently, and the confirmation says so.
 
+**Apps you already deleted:** the **Probably Removed** group lists apps that are gone but left files in your
+Library (Application Support, Preferences, Caches, Containers, Logs, Saved Application State, HTTPStorages,
+WebKit), biggest first. An item counts when it's named like an app ID (`com.vendor.App`) and macOS knows
+no app with that ID. Apple's items, helpers of installed apps and tool caches are skipped. Select one to see
+its files, the same as **Already Removed App…** (where you can also type a bundle ID or name yourself).
+Check each item before removing it.
+
 Whatever the list says, MacScan refuses to remove top-level or system locations (`/Applications`, `/Library`,
 `~/Library/…` roots, `/System`, `/usr`, …).
 
@@ -420,6 +429,12 @@ its agent.
   one missed while the Mac was off or you were logged out is skipped.
 - While an option is on, MacScan appears in System Settings › General › Login Items and in its own
   Startup Items scan (labelled as MacScan's own agent).
+
+**New permissions.** *Settings › Background › "Tell me when an app gets a sensitive permission"* is on by
+default. While MacScan runs (it stays in the menu bar), it reads the permission list every 5 minutes and
+sends a notification when an app gets the camera, microphone, screen recording, Accessibility, Input
+Monitoring or Full Disk Access, e.g. "Zoom can now use your camera". Click it to open Privacy. The first read
+only saves a starting point (`permission-watch.json`). It needs Full Disk Access and only reads the list.
 - The agents point at the copy of MacScan that turned them on. If you move the app, open it once and
   MacScan repairs them.
 

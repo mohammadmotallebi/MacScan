@@ -27,6 +27,19 @@ struct UninstallView: View {
                             ForEach(model.filteredRemovedApps) { app in AppRow(app: app) }
                         }
                     }
+                    if !model.filteredProbablyRemoved.isEmpty {
+                        Section {
+                            ForEach(model.filteredProbablyRemoved) { app in
+                                AppRow(app: app, size: model.leftoverSizes[app.id])
+                            }
+                        } header: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Probably Removed")
+                                Text("Files named after apps that aren't on this Mac. Check before removing.")
+                                    .font(.caption2).foregroundStyle(.secondary).textCase(nil)
+                            }
+                        }
+                    }
                 }
                 .overlay {
                     if model.isLoadingApps && model.apps.isEmpty { ProgressView("Loading apps…") }
@@ -92,6 +105,8 @@ struct UninstallView: View {
 
 struct AppRow: View {
     let app: InstalledApp
+    /// What it left behind, for apps that are gone.
+    var size: Int64?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -108,6 +123,11 @@ struct AppRow: View {
                     .lineLimit(1)
             }
             Spacer()
+            if let size {
+                Text(size.formatted(.byteCount(style: .file)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
             if app.isProtected {
                 Image(systemName: "lock.fill").foregroundStyle(.secondary).help(app.protectionReason ?? "")
             }

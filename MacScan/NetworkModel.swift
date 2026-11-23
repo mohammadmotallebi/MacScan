@@ -15,13 +15,18 @@ final class NetworkModel {
 
     func refresh() {
         guard !isChecking else { return }
+        Task { await run() }
+    }
+
+    /// Takes a snapshot, updates the section and returns it (a Full Check stores a summary of it).
+    @discardableResult
+    func run() async -> NetworkSnapshot {
         isChecking = true
-        Task {
-            let result = await Task.detached { await NetworkScanner().run() }.value
-            snapshot = result
-            isChecking = false
-            FileLogger.shared.info("Network check: \(result.apps.count) programs, \(result.count(.warning)) warnings, \(result.count(.review)) to review\(result.problem.map { ", problem: \($0)" } ?? "")")
-        }
+        let result = await Task.detached { await NetworkScanner().run() }.value
+        snapshot = result
+        isChecking = false
+        FileLogger.shared.info("Network check: \(result.apps.count) programs, \(result.count(.warning)) warnings, \(result.count(.review)) to review\(result.problem.map { ", problem: \($0)" } ?? "")")
+        return result
     }
 
     func shown(_ snapshot: NetworkSnapshot) -> [NetworkApp] {

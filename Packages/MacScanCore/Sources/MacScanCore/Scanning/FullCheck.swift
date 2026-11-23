@@ -109,12 +109,43 @@ public struct PrivacySummary: Codable, Hashable, Sendable {
     }
 }
 
+/// The network snapshot as it was when a Full Check ran.
+public struct NetworkSummary: Codable, Hashable, Sendable {
+    /// Programs with a connection open or waiting for one.
+    public var programs: Int
+    /// Programs talking to the internet.
+    public var internet: Int
+    /// Programs that accept connections from other computers.
+    public var openToOthers: Int
+    public var warnings: Int
+    public var review: Int
+
+    public init(programs: Int, internet: Int, openToOthers: Int, warnings: Int, review: Int) {
+        self.programs = programs
+        self.internet = internet
+        self.openToOthers = openToOthers
+        self.warnings = warnings
+        self.review = review
+    }
+
+    public init(snapshot: NetworkSnapshot) {
+        self.init(
+            programs: snapshot.apps.count,
+            internet: snapshot.apps.lazy.filter { $0.widestScope == .internet }.count,
+            openToOthers: snapshot.apps.lazy.filter(\.openToOthers).count,
+            warnings: snapshot.count(.warning),
+            review: snapshot.count(.review))
+    }
+}
+
 /// Marks a session as a Full Check and carries what isn't a finding.
 public struct FullCheckInfo: Codable, Hashable, Sendable {
     /// Nil when the security settings weren't read.
     public var security: PostureSummary?
     /// Nil in Full Checks from before privacy was part of them.
     public var privacy: PrivacySummary?
+    /// Nil in Full Checks from before the network was part of them, or when it couldn't be read.
+    public var network: NetworkSummary?
     /// When the Full Check this one was compared with ran. Nil for the first one (nothing to compare with).
     public var comparedWith: Date?
     /// What changed since then. Nil when nothing was compared.
@@ -122,9 +153,10 @@ public struct FullCheckInfo: Codable, Hashable, Sendable {
     /// True once change tracking ran for this check (nil in Full Checks from before it existed).
     public var tracked: Bool?
 
-    public init(security: PostureSummary? = nil, privacy: PrivacySummary? = nil) {
+    public init(security: PostureSummary? = nil, privacy: PrivacySummary? = nil, network: NetworkSummary? = nil) {
         self.security = security
         self.privacy = privacy
+        self.network = network
     }
 
     /// No checks (the settings couldn't be read at all) leaves the summary out instead of showing "0 of 0".

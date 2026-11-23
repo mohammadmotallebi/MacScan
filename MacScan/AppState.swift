@@ -98,6 +98,7 @@ final class AppState {
             refreshEngineStatus()
             backgroundSettingsChanged(from: oldValue)
             if settings.showInMenuBar != oldValue.showInMenuBar { menuBarSettingChanged() }
+            if settings.watchPermissions != oldValue.watchPermissions { updatePermissionWatch() }
         }
     }
 
@@ -178,6 +179,12 @@ final class AppState {
         refreshEngineStatus()
 
         NotificationRouter.shared.openSession = { [weak self] id in self?.showSession(id) }
+        NotificationRouter.shared.openPrivacy = { [weak self] in
+            guard let self else { return }
+            self.selectedSection = .privacy
+            self.privacy.refresh()
+            self.bringToFront()
+        }
         // Background scans save to history while the app is open or closed: pick them up when MacScan comes forward.
         activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
@@ -191,6 +198,40 @@ final class AppState {
         }
         repairBackgroundAgentIfNeeded()
         menuBar.update(visible: settings.showInMenuBar)
+        updatePermissionWatch()
+    }
+
+    // MARK: - Permission watch
+
+    @ObservationIgnored private var permissionWatchTimer: Timer?
+
+    /// Starts or stops reading the permission list every 5 minutes.
+    func updatePermissionWatch() {
+        permissionWatchTimer?.invalidate()
+        permissionWatchTimer = nil
+        guard settings.watchPermissions else { return }
+        permissionWatchTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkPermissions() }
+        }
+        // A first read soon after launch sets the starting point.
+        Task {
+            try? await Task.sleep(for: .seconds(20))
+            self.checkPermissions()
+        }
+    }
+
+    private func checkPermissions() {
+        guard settings.watchPermissions else { return }
+        Task {
+            let new = await Task.detached { () -> [PrivacyGrant]? in
+                PermissionWatcher().check(PrivacyAudit().run())
+            }.value
+            guard let new else { return }
+            if !new.isEmpty {
+                logger.info("Permission watch: \(new.map { "\($0.permission.title) for \($0.client)" }.joined(separator: ", "))")
+            }
+            for grant in new { await PermissionAlert.post(grant) }
+        }
     }
 
     // MARK: - Menu bar
@@ -336,10 +377,12 @@ final class AppState {
         guard !isScanning else { return }
         let security = security
         let privacy = privacy
+        let network = network
         startScan(FullCheck.targets, fullCheck: Task {
             async let checks = security.run()
             async let report = privacy.run()
-            return FullCheckExtras(checks: await checks, privacy: await report)
+            async let snapshot = network.run()
+            return FullCheckExtras(checks: await checks, privacy: await report, network: await snapshot)
         })
     }
 

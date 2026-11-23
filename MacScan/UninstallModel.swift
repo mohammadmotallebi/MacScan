@@ -16,6 +16,10 @@ final class UninstallModel {
     var trashApps: [InstalledApp] = []
     /// Apps that are already deleted, added by bundle ID / name so their leftovers can be found.
     var removedApps: [InstalledApp] = []
+    /// Apps that seem removed but left files in the Library, found on their own. Biggest first.
+    var probablyRemoved: [InstalledApp] = []
+    /// Size of what each probably-removed app left, by app ID.
+    var leftoverSizes: [String: Int64] = [:]
     var showingRemovedAppSheet = false
     /// Delete instead of moving to the Trash (items already in the Trash are always deleted).
     var deletePermanently = false
@@ -36,7 +40,7 @@ final class UninstallModel {
     var selectedApp: InstalledApp? {
         guard let selectedAppID else { return nil }
         return apps.first { $0.id == selectedAppID } ?? trashApps.first { $0.id == selectedAppID }
-            ?? removedApps.first { $0.id == selectedAppID }
+            ?? removedApps.first { $0.id == selectedAppID } ?? probablyRemoved.first { $0.id == selectedAppID }
     }
 
     private func matches(_ app: InstalledApp) -> Bool {
@@ -47,6 +51,9 @@ final class UninstallModel {
     var filteredApps: [InstalledApp] { apps.filter(matches) }
     var filteredTrashApps: [InstalledApp] { trashApps.filter(matches) }
     var filteredRemovedApps: [InstalledApp] { removedApps.filter(matches) }
+    var filteredProbablyRemoved: [InstalledApp] {
+        probablyRemoved.filter { app in matches(app) && !removedApps.contains { $0.id == app.id } }
+    }
 
     /// Adds an already-deleted app by bundle ID and/or name and looks for its leftovers.
     /// Returns an error message to show in the sheet, or nil on success.
@@ -90,6 +97,22 @@ final class UninstallModel {
             let extra = self.apps.filter { app in !list.contains { $0.id == app.id } && FileManager.default.fileExists(atPath: app.id) }
             self.apps = (list + extra).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             self.isLoadingApps = false
+            self.findProbablyRemoved(installedIDs: Set((list + trash).flatMap(\.allBundleIDs)))
+        }
+    }
+
+    /// Looks in the Library for leftovers of apps that are gone. Only reads.
+    private func findProbablyRemoved(installedIDs: Set<String>) {
+        Task {
+            let found = await Task.detached { RemovedAppFinder(installedIDs: installedIDs).find() }.value
+            var sizes: [String: Int64] = [:]
+            self.probablyRemoved = found.compactMap { candidate in
+                guard let app = InstalledApp.removed(bundleID: candidate.bundleID, name: nil), !app.isProtected else { return nil }
+                sizes[app.id] = candidate.size
+                return app
+            }
+            self.leftoverSizes = sizes
+            FileLogger.shared.info("Probably removed apps: \(found.count)")
         }
     }
 

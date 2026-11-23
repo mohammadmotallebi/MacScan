@@ -3,6 +3,24 @@ import MacScanCore
 import UserNotifications
 
 private let sessionIDKey = "MacScan.sessionID"
+private let sectionKey = "MacScan.section"
+
+/// Tells the user that an app just got a sensitive permission. A click opens the Privacy section.
+enum PermissionAlert {
+    static func post(_ grant: PrivacyGrant) async {
+        let content = UNMutableNotificationContent()
+        content.title = "New permission"
+        content.body = PermissionWatcher.message(for: grant)
+        content.sound = .default
+        content.userInfo = [sectionKey: "privacy"]
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        do {
+            try await UNUserNotificationCenter.current().add(request)
+        } catch {
+            FileLogger.shared.warning("Could not post notification: \(error.localizedDescription)")
+        }
+    }
+}
 
 /// Delivers background-scan notifications through Notification Center. Used by the headless worker.
 struct UserNotifier: BackgroundNotifying {
@@ -60,6 +78,9 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
 
     private var pending: UUID?
 
+    /// Set by `AppState`: opens the Privacy section.
+    var openPrivacy: (() -> Void)?
+
     func install() {
         UNUserNotificationCenter.current().delegate = self
     }
@@ -69,6 +90,10 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        if response.notification.request.content.userInfo[sectionKey] as? String == "privacy" {
+            await MainActor.run { NotificationRouter.shared.openPrivacy?() }
+            return
+        }
         guard let raw = response.notification.request.content.userInfo[sessionIDKey] as? String, let id = UUID(uuidString: raw) else { return }
         await MainActor.run { NotificationRouter.shared.route(id) }
     }

@@ -66,6 +66,11 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("fullcheck-baseline.json")
     }
 
+    /// The sensitive permissions seen at the last permission watch.
+    public static var permissionWatchFile: URL {
+        applicationSupport.appendingPathComponent("permission-watch.json")
+    }
+
     /// Held while a background scan runs, so the scheduled scan and the Downloads watcher take turns.
     public static var backgroundLockFile: URL {
         applicationSupport.appendingPathComponent("background.lock")

@@ -196,6 +196,19 @@ struct FullCheckSummaryView: View {
                 .buttonStyle(.plain)
                 .help(Self.help(for: privacy))
             }
+            if let network = info.network {
+                Button {
+                    state.selectedSection = .network
+                    state.network.refresh()
+                } label: {
+                    FullCheckTile(
+                        title: "Network", symbol: "network",
+                        color: network.warnings > 0 ? .orange : network.review > 0 ? .blue : .green,
+                        line: Self.line(for: network), isSelected: false)
+                }
+                .buttonStyle(.plain)
+                .help("\(network.programs) programs used the network when this check ran; \(network.internet) talked to the internet and \(network.openToOthers) accepted connections from other computers. Open the Network section for now.")
+            }
         }
         .padding(8)
     }
@@ -206,6 +219,13 @@ struct FullCheckSummaryView: View {
         if summary.threats > 0 { parts.append("\(summary.threats) threat\(summary.threats == 1 ? "" : "s")") }
         if summary.warnings > 0 { parts.append("\(summary.warnings) warning\(summary.warnings == 1 ? "" : "s")") }
         return parts.isEmpty ? "No issues · \(summary.clean.formatted()) checked" : parts.joined(separator: " · ")
+    }
+
+    static func line(for network: NetworkSummary) -> String {
+        var parts: [String] = []
+        if network.warnings > 0 { parts.append("\(network.warnings) warning\(network.warnings == 1 ? "" : "s")") }
+        if network.review > 0 { parts.append("\(network.review) worth a look") }
+        return parts.isEmpty ? "Nothing odd · \(network.programs) programs" : parts.joined(separator: " · ")
     }
 
     static func color(for privacy: PrivacySummary) -> Color {
@@ -309,6 +329,8 @@ struct FullCheckChangesView: View {
                 Button("Privacy") { state.selectedSection = .privacy }.controlSize(.small).buttonStyle(.glass)
             case .settingChanged, .settingFixed:
                 Button("Security") { state.selectedSection = .security }.controlSize(.small).buttonStyle(.glass)
+            case .newListener:
+                Button("Network") { state.selectedSection = .network }.controlSize(.small).buttonStyle(.glass)
             case .newApp:
                 if let path = change.path {
                     Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }.controlSize(.small).buttonStyle(.glass)
@@ -325,6 +347,7 @@ extension FullCheckChange.Kind {
         case .newPermission: "New permission"
         case .settingChanged: "Setting changed"
         case .settingFixed: "Fixed"
+        case .newListener: "New program online"
         }
     }
 
@@ -334,13 +357,14 @@ extension FullCheckChange.Kind {
         case .newPermission: "hand.raised.fill"
         case .settingChanged: "exclamationmark.triangle.fill"
         case .settingFixed: "checkmark.circle.fill"
+        case .newListener: "network"
         }
     }
 
     var color: Color {
         switch self {
         case .newApp: .blue
-        case .newPermission, .settingChanged: .orange
+        case .newPermission, .settingChanged, .newListener: .orange
         case .settingFixed: .green
         }
     }

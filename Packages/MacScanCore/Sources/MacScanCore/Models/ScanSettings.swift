@@ -51,6 +51,8 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     /// Show an icon in the menu bar. Closing the window then keeps MacScan running there,
     /// and only Quit MacScan closes it.
     public var showInMenuBar: Bool = true
+    /// While MacScan runs, tell the user when an app gets camera, microphone, screen, keyboard or Full Disk Access.
+    public var watchPermissions: Bool = true
 
     public init() {}
 
@@ -97,6 +99,7 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         scheduledFullCheck = try c.decodeIfPresent(Bool.self, forKey: .scheduledFullCheck) ?? d.scheduledFullCheck
         watchDownloads = try c.decodeIfPresent(Bool.self, forKey: .watchDownloads) ?? d.watchDownloads
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
+        watchPermissions = try c.decodeIfPresent(Bool.self, forKey: .watchPermissions) ?? d.watchPermissions
     }
 }
 

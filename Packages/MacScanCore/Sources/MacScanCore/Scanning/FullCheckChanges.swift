@@ -9,6 +9,8 @@ public struct FullCheckChange: Codable, Hashable, Sendable, Identifiable {
         case settingChanged
         /// A security check that passes now and didn't before.
         case settingFixed
+        /// A program that now accepts connections from other computers.
+        case newListener
     }
 
     public var kind: Kind
@@ -36,6 +38,7 @@ public struct FullCheckChange: Codable, Hashable, Sendable, Identifiable {
         case .newPermission: "\(title): " + (detail.split(separator: ".").first.map { String($0).replacingOccurrences(of: "Can now use ", with: "now uses ") } ?? detail)
         case .settingChanged: "\(title) changed"
         case .settingFixed: "\(title) fixed"
+        case .newListener: "\(title) accepts connections"
         }
     }
 }
@@ -44,23 +47,31 @@ public struct FullCheckChange: Codable, Hashable, Sendable, Identifiable {
 public struct FullCheckExtras: Sendable {
     public var checks: [PostureCheck]
     public var privacy: PrivacyReport
+    /// Nil when the network wasn't looked at.
+    public var network: NetworkSnapshot?
 
-    public init(checks: [PostureCheck], privacy: PrivacyReport) {
+    public init(checks: [PostureCheck], privacy: PrivacyReport, network: NetworkSnapshot? = nil) {
         self.checks = checks
         self.privacy = privacy
+        self.network = network
     }
 
-    /// Reads both, as the current user.
+    /// The snapshot, if it could be taken.
+    var readableNetwork: NetworkSnapshot? { network.flatMap { $0.problem == nil ? $0 : nil } }
+
+    /// Reads all three, as the current user.
     public static func read() async -> FullCheckExtras {
         async let checks = SecurityPosture().check()
+        async let network = NetworkScanner().run()
         let privacy = PrivacyAudit().run()
-        return FullCheckExtras(checks: await checks, privacy: privacy)
+        return FullCheckExtras(checks: await checks, privacy: privacy, network: await network)
     }
 
     /// Marks the session as a Full Check, stores the summaries, and compares it with the previous one.
     public func attach(to session: inout ScanSession, tracker: FullCheckChangeTracker = FullCheckChangeTracker(), logger: FileLogger = .shared) {
-        session.fullCheck = FullCheckInfo(security: FullCheckInfo(checks: checks).security, privacy: PrivacySummary(report: privacy))
-        tracker.apply(to: &session, checks: checks, privacy: privacy)
+        session.fullCheck = FullCheckInfo(security: FullCheckInfo(checks: checks).security, privacy: PrivacySummary(report: privacy),
+                                          network: readableNetwork.map(NetworkSummary.init(snapshot:)))
+        tracker.apply(to: &session, checks: checks, privacy: privacy, network: readableNetwork)
         if let changes = session.fullCheck?.changes {
             logger.info("Full Check changes: \(changes.count) (" + Dictionary(grouping: changes, by: \.kind).map { "\($0.key.rawValue)=\($0.value.count)" }.sorted().joined(separator: ", ") + ")")
         }
@@ -73,6 +84,8 @@ struct FullCheckBaseline: Codable {
     var apps: [String]
     /// "permission|client" of sensitive permissions that were allowed.
     var permissions: [String]?
+    /// Programs that accepted connections from other computers. Nil in older files.
+    var listeners: [String]?
     /// Check ID → status and summary.
     var checks: [String: Check]
 
@@ -98,7 +111,7 @@ public struct FullCheckChangeTracker: Sendable {
 
     /// Compares this Full Check with the previous one and saves it as the new starting point.
     /// A scan that didn't complete is neither compared nor saved.
-    public func apply(to session: inout ScanSession, checks: [PostureCheck], privacy: PrivacyReport?) {
+    public func apply(to session: inout ScanSession, checks: [PostureCheck], privacy: PrivacyReport?, network: NetworkSnapshot? = nil) {
         guard session.status == .completed, var info = session.fullCheck else { return }
 
         let apps = Set(session.findings.filter { $0.area == .applications }.map(\.unitPath).filter { $0.lowercased().hasSuffix(".app") })
@@ -112,12 +125,14 @@ public struct FullCheckChangeTracker: Sendable {
             checkStates[check.id.rawValue] = .init(status: check.status.rawValue, summary: check.summary)
         }
 
+        let listeners = network.map(Self.listeners)
+
         let old = load()
         info.tracked = true
         if let old {
             info.comparedWith = old.date
             info.changes = Self.changes(old: old, apps: apps, findings: session.findings,
-                                        grants: readable ? grants : nil, checks: checks)
+                                        grants: readable ? grants : nil, checks: checks, listeners: listeners)
         } else {
             info.comparedWith = nil
             info.changes = nil
@@ -130,13 +145,24 @@ public struct FullCheckChangeTracker: Sendable {
             date: session.startedAt,
             apps: apps.sorted(),
             permissions: readable ? grants.map(Self.key).sorted() : old?.permissions,
+            listeners: listeners.map { $0.keys.sorted() } ?? old?.listeners,
             checks: checksToKeep)
         save(baseline)
     }
 
     static func key(_ grant: PrivacyGrant) -> String { "\(grant.permission.rawValue)|\(grant.client)" }
 
-    static func changes(old: FullCheckBaseline, apps: Set<String>, findings: [Finding], grants: [PrivacyGrant]?, checks: [PostureCheck]) -> [FullCheckChange] {
+    /// Programs (not macOS's own) that accept connections from other computers, by path or name.
+    static func listeners(_ snapshot: NetworkSnapshot) -> [String: NetworkApp] {
+        var result: [String: NetworkApp] = [:]
+        for app in snapshot.apps where app.openToOthers && !app.isApple {
+            result[app.path ?? app.name] = app
+        }
+        return result
+    }
+
+    static func changes(old: FullCheckBaseline, apps: Set<String>, findings: [Finding], grants: [PrivacyGrant]?, checks: [PostureCheck],
+                        listeners: [String: NetworkApp]? = nil) -> [FullCheckChange] {
         var result: [FullCheckChange] = []
 
         let oldApps = Set(old.apps)
@@ -160,6 +186,16 @@ public struct FullCheckChangeTracker: Sendable {
             }
         }
 
+        // Compared only when the previous check also looked at the network.
+        if let listeners, let oldListeners = old.listeners.map(Set.init) {
+            for (key, app) in listeners.sorted(by: { $0.key < $1.key }) where !oldListeners.contains(key) {
+                let ports = app.listeners.filter { $0.allInterfaces && $0.proto == "TCP" }.map(\.port)
+                let portText = ports.isEmpty ? "" : " (port\(ports.count == 1 ? "" : "s") \(ports.prefix(3).joined(separator: ", ")))"
+                result.append(FullCheckChange(kind: .newListener, title: app.name,
+                                              detail: "Now accepts connections from other computers\(portText).", path: app.path))
+            }
+        }
+
         for check in checks where check.status != .unknown {
             guard let before = old.checks[check.id.rawValue] else { continue }
             let wasPassing = before.status == PostureStatus.pass.rawValue
@@ -172,7 +208,7 @@ public struct FullCheckChangeTracker: Sendable {
             }
         }
 
-        let order: [FullCheckChange.Kind] = [.settingChanged, .newPermission, .newApp, .settingFixed]
+        let order: [FullCheckChange.Kind] = [.settingChanged, .newPermission, .newListener, .newApp, .settingFixed]
         return result.enumerated().sorted { a, b in
             let ka = order.firstIndex(of: a.element.kind)!, kb = order.firstIndex(of: b.element.kind)!
             return ka != kb ? ka < kb : a.offset < b.offset

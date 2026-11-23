@@ -244,12 +244,14 @@ struct StatusCards: View {
     }
 
     private var networkCard: some View {
+        // Live result if the section was checked, else what the last Full Check saw.
         let snapshot = state.network.snapshot
-        let warnings = snapshot?.count(.warning) ?? 0
+        let summary = snapshot.flatMap { $0.problem == nil ? NetworkSummary(snapshot: $0) : nil } ?? lastFullCheck?.network
+        let flagged = (summary?.warnings ?? 0) + (summary?.review ?? 0)
         return StatusCard(title: "Network", symbol: "network", color: .green,
-                          value: snapshot.map { "\($0.apps.count) programs" } ?? "Not checked",
-                          line: snapshot == nil ? "Open to check" : warnings > 0 ? "\(warnings) worth a look" : "Nothing odd",
-                          lineColor: warnings > 0 ? .orange : nil) {
+                          value: summary.map { "\($0.programs) programs" } ?? "Not checked",
+                          line: summary == nil ? "Open to check" : flagged > 0 ? "\(flagged) worth a look" : "Nothing odd",
+                          lineColor: (summary?.warnings ?? 0) > 0 ? .orange : nil) {
             state.selectedSection = .network
             if snapshot == nil { state.network.refresh() }
         }
