@@ -257,6 +257,8 @@ final class AppState {
     private func backgroundSettingsChanged(from old: ScanSettings) {
         let unchanged = settings.scheduledScanEnabled == old.scheduledScanEnabled
             && settings.watchDownloads == old.watchDownloads
+            && settings.watchStartupItems == old.watchStartupItems
+            && settings.watchNewApps == old.watchNewApps
             && settings.scheduleFrequency == old.scheduleFrequency
             && settings.scheduleWeekday == old.scheduleWeekday
             && settings.scheduleHour == old.scheduleHour
@@ -278,7 +280,25 @@ final class AppState {
                 tracker.forget()
             }
         }
+        if settings.watchNewApps != old.watchNewApps {
+            if settings.watchNewApps { baselineApps(force: true) } else { Self.appTrackers.forEach { $0.forget() } }
+        }
         syncBackgroundAgent()
+    }
+
+    static var appTrackers: [DownloadsTracker] {
+        AppPaths.applicationFolders.map { DownloadsTracker(folder: $0.url, stateFile: AppPaths.appsSeenFile($0.name)) }
+    }
+
+    /// Marks the apps already installed as seen, so the new-app watcher only scans later arrivals.
+    /// Without `force`, only folders that have no saved state yet.
+    private func baselineApps(force: Bool) {
+        for tracker in Self.appTrackers where force || tracker.loadSeen() == nil {
+            guard FileManager.default.fileExists(atPath: tracker.folder.path) else { continue }
+            let apps = (try? tracker.current())?.filter { $0.key.lowercased().hasSuffix(".app") } ?? [:]
+            try? tracker.save(apps)
+            logger.info("New-app watcher: \(apps.count) app(s) in \(tracker.folder.path) marked as seen")
+        }
     }
 
     /// Installs, updates or removes MacScan's launch agents so they match the settings.
@@ -305,7 +325,9 @@ final class AppState {
     private func repairBackgroundAgentIfNeeded() {
         guard settings.backgroundScansEnabled, let executable = Bundle.main.executableURL else { return }
         let agent = BackgroundAgent(executable: executable)
+        if settings.watchNewApps { baselineApps(force: false) }
         let enabled: [ScanTrigger] = (settings.scheduledScanEnabled ? [.scheduled] : []) + (settings.watchDownloads ? [.downloads] : [])
+            + (settings.watchStartupItems ? [.startupItems] : []) + (settings.watchNewApps ? [.newApps] : [])
         let broken = enabled.contains { trigger in
             guard let installed = agent.installedExecutable(for: trigger) else { return true }
             return !FileManager.default.fileExists(atPath: installed)

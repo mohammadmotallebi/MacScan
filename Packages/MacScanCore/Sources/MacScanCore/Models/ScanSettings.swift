@@ -51,13 +51,17 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     /// Show an icon in the menu bar. Closing the window then keeps MacScan running there,
     /// and only Quit MacScan closes it.
     public var showInMenuBar: Bool = true
+    /// Alert when a startup item appears or changes (launchd starts MacScan when those folders change).
+    public var watchStartupItems: Bool = true
+    /// Scan apps when they arrive in or change in the Applications folders (launchd starts MacScan).
+    public var watchNewApps: Bool = true
     /// While MacScan runs, tell the user when an app gets camera, microphone, screen, keyboard or Full Disk Access.
     public var watchPermissions: Bool = true
 
     public init() {}
 
     /// True when any background (launchd-started) scan is turned on.
-    public var backgroundScansEnabled: Bool { scheduledScanEnabled || watchDownloads }
+    public var backgroundScansEnabled: Bool { scheduledScanEnabled || watchDownloads || watchStartupItems || watchNewApps }
 
     public var maxFileSizeBytes: Int64 { Int64(max(1, maxFileSizeMB)) * 1024 * 1024 }
 
@@ -99,6 +103,8 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         scheduledFullCheck = try c.decodeIfPresent(Bool.self, forKey: .scheduledFullCheck) ?? d.scheduledFullCheck
         watchDownloads = try c.decodeIfPresent(Bool.self, forKey: .watchDownloads) ?? d.watchDownloads
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
+        watchStartupItems = try c.decodeIfPresent(Bool.self, forKey: .watchStartupItems) ?? d.watchStartupItems
+        watchNewApps = try c.decodeIfPresent(Bool.self, forKey: .watchNewApps) ?? d.watchNewApps
         watchPermissions = try c.decodeIfPresent(Bool.self, forKey: .watchPermissions) ?? d.watchPermissions
     }
 }

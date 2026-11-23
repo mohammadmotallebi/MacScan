@@ -389,6 +389,15 @@ struct BackgroundSettingsView: View {
             }
 
             Section {
+                Toggle("Alert on new startup items", isOn: $state.settings.watchStartupItems)
+                SettingsHint("When something is added to or changed in a LaunchAgents or LaunchDaemons folder, MacScan checks it and tells you what it runs and who signed it. Malware almost always adds a startup item.")
+                Toggle("Scan new apps", isOn: $state.settings.watchNewApps)
+                SettingsHint("When an app arrives in or is updated in /Applications or ~/Applications, MacScan scans it. You only hear about it when something looks wrong.")
+            } header: {
+                SettingsHeader(title: "Live protection", symbol: "bolt.shield.fill", color: .green)
+            }
+
+            Section {
                 Toggle("Tell me when an app gets a sensitive permission", isOn: $state.settings.watchPermissions)
                 SettingsHint("While MacScan runs (it stays in the menu bar), it checks every 5 minutes whether an app got your camera, microphone, screen, keyboard or Full Disk Access, and sends a notification. MacScan only reads the list.")
                 if state.settings.watchPermissions && !state.fullDiskAccessLikelyGranted {
@@ -428,7 +437,7 @@ struct BackgroundSettingsView: View {
                     Label(error, systemImage: "xmark.octagon.fill").foregroundStyle(.red).font(.callout)
                     Button("Try Again") { state.syncBackgroundAgent() }
                 }
-                SettingsHint("macOS starts MacScan for each background scan and MacScan exits when the scan ends, so nothing stays running in between. While either option is on, MacScan appears in System Settings › General › Login Items and in its own Startup Items scan. Turning both off removes its launch agents. Background scans never run as administrator.")
+                SettingsHint("macOS starts MacScan for each background scan and MacScan exits when the scan ends, so nothing stays running in between. While any option is on, MacScan appears in System Settings › General › Login Items and in its own Startup Items scan. Turning them all off removes its launch agents. Background scans never run as administrator.")
             } header: {
                 SettingsHeader(title: "How it works", symbol: "info.circle.fill", color: .gray)
             }

@@ -113,7 +113,7 @@ struct HistoryRow: View {
                     .truncationMode(.middle)
                 HStack(spacing: 8) {
                     if let trigger = session.trigger {
-                        Label(trigger.title, systemImage: trigger == .scheduled ? "calendar.badge.clock" : "arrow.down.circle")
+                        Label(trigger.title, systemImage: trigger.symbol)
                             .labelStyle(.titleAndIcon)
                             .foregroundStyle(.secondary)
                     }
@@ -125,5 +125,16 @@ struct HistoryRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+extension ScanTrigger {
+    var symbol: String {
+        switch self {
+        case .scheduled: "calendar.badge.clock"
+        case .downloads: "arrow.down.circle"
+        case .startupItems: "power.circle"
+        case .newApps: "app.badge"
+        }
     }
 }

@@ -186,11 +186,17 @@ public enum ScanStatus: String, Codable, Sendable {
 public enum ScanTrigger: String, Codable, Sendable, CaseIterable {
     case scheduled
     case downloads
+    /// Something changed in a LaunchAgents or LaunchDaemons folder.
+    case startupItems = "startup-items"
+    /// An app arrived in or changed in /Applications or ~/Applications.
+    case newApps = "new-apps"
 
     public var title: String {
         switch self {
         case .scheduled: "Scheduled"
         case .downloads: "New downloads"
+        case .startupItems: "Startup watch"
+        case .newApps: "New apps"
         }
     }
 }

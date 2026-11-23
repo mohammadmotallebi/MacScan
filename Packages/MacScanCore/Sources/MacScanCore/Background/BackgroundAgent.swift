@@ -42,6 +42,8 @@ public struct BackgroundAgent: Sendable {
         switch trigger {
         case .scheduled: labelPrefix + "scheduled-scan"
         case .downloads: labelPrefix + "downloads-watcher"
+        case .startupItems: labelPrefix + "startup-watcher"
+        case .newApps: labelPrefix + "apps-watcher"
         }
     }
 
@@ -50,6 +52,9 @@ public struct BackgroundAgent: Sendable {
     /// ~/Library/LaunchAgents.
     public let directory: URL
     public let downloadsFolder: URL
+    /// Folders the startup watcher and the new-app watcher watch.
+    public let startupFolders: [URL]
+    public let appFolders: [URL]
     let launchctl: any LaunchctlRunning
     let domain: String
     let retryDelay: Duration
@@ -58,6 +63,8 @@ public struct BackgroundAgent: Sendable {
         executable: URL,
         directory: URL = AppPaths.launchAgents,
         downloadsFolder: URL = AppPaths.downloads,
+        startupFolders: [URL] = [AppPaths.launchAgents, URL(fileURLWithPath: "/Library/LaunchAgents"), URL(fileURLWithPath: "/Library/LaunchDaemons")],
+        appFolders: [URL] = AppPaths.applicationFolders.map(\.url),
         launchctl: any LaunchctlRunning = SystemLaunchctl(),
         domain: String = "gui/\(getuid())",
         retryDelay: Duration = .milliseconds(400)
@@ -65,6 +72,8 @@ public struct BackgroundAgent: Sendable {
         self.executable = executable
         self.directory = directory
         self.downloadsFolder = downloadsFolder
+        self.startupFolders = startupFolders
+        self.appFolders = appFolders
         self.launchctl = launchctl
         self.domain = domain
         self.retryDelay = retryDelay
@@ -102,6 +111,14 @@ public struct BackgroundAgent: Sendable {
             guard settings.watchDownloads else { return nil }
             job["WatchPaths"] = [downloadsFolder.path]
             job["ThrottleInterval"] = 15
+        case .startupItems:
+            guard settings.watchStartupItems else { return nil }
+            job["WatchPaths"] = startupFolders.map(\.path)
+            job["ThrottleInterval"] = 15
+        case .newApps:
+            guard settings.watchNewApps else { return nil }
+            job["WatchPaths"] = appFolders.map(\.path)
+            job["ThrottleInterval"] = 30
         }
         return job
     }
@@ -122,7 +139,7 @@ public struct BackgroundAgent: Sendable {
     }
 
     /// Makes the installed agents match `settings`: writes and loads what's turned on, unloads and
-    /// deletes what's turned off. Only ever touches MacScan's own two plists.
+    /// deletes what's turned off. Only ever touches MacScan's own plists.
     public func sync(settings: ScanSettings, logger: FileLogger = .shared) async throws {
         for trigger in ScanTrigger.allCases {
             let label = Self.label(for: trigger)

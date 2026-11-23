@@ -66,6 +66,16 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("fullcheck-baseline.json")
     }
 
+    /// Apps already seen in one Applications folder (`name` keeps the two folders apart).
+    public static func appsSeenFile(_ name: String) -> URL {
+        applicationSupport.appendingPathComponent("apps-seen-\(name).json")
+    }
+
+    /// /Applications and ~/Applications, as the new-app watcher sees them.
+    public static var applicationFolders: [(name: String, url: URL)] {
+        [("system", URL(fileURLWithPath: "/Applications")), ("user", home.appendingPathComponent("Applications"))]
+    }
+
     /// The sensitive permissions seen at the last permission watch.
     public static var permissionWatchFile: URL {
         applicationSupport.appendingPathComponent("permission-watch.json")

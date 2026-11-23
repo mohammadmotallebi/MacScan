@@ -35,6 +35,14 @@ public struct BackgroundScanEnvironment: Sendable {
     /// How long a new download must stay unchanged before it's scanned, and the longest wait for that.
     public var settleInterval: Duration = .seconds(2)
     public var settleTimeout: Duration = .seconds(600)
+    /// One tracker per Applications folder for the new-app watcher.
+    public var appTrackers: [DownloadsTracker] = AppPaths.applicationFolders.map {
+        DownloadsTracker(folder: $0.url, stateFile: AppPaths.appsSeenFile($0.name))
+    }
+    /// An app must stay unchanged this long before it's scanned (installers and updates write in bursts).
+    public var appSettleInterval: Duration = .seconds(10)
+    /// Wait after a startup folder changes, so an installer can finish writing its items.
+    public var startupSettle: Duration = .seconds(5)
 
     public init(
         settings: ScanSettings,
@@ -153,6 +161,8 @@ public enum BackgroundScanWorker {
         switch trigger {
         case .scheduled: await runScheduled(env)
         case .downloads: await runDownloads(env)
+        case .startupItems: await runStartupWatch(env)
+        case .newApps: await runNewApps(env)
         }
     }
 
@@ -186,44 +196,103 @@ public enum BackgroundScanWorker {
             env.logger.info("Downloads scan skipped: it is turned off in Settings")
             return []
         }
+        return await scanNewItems(in: env.downloads, include: { _ in true }, trigger: .downloads, interval: env.settleInterval, env)
+    }
+
+    /// Scans the items in `tracker`'s folder that are new or changed since last time. The first run only
+    /// marks what's there as seen.
+    static func scanNewItems(in tracker: DownloadsTracker, include: (String) -> Bool, trigger: ScanTrigger,
+                             interval: Duration, _ env: BackgroundScanEnvironment) async -> [ScanSession] {
+        let place = tracker.folder.path.replacingOccurrences(of: AppPaths.home.path, with: "~")
         var sessions: [ScanSession] = []
         // Keep going while new items arrive during a scan; the bound only guards against a loop.
         for _ in 0..<20 {
             let current: DownloadsTracker.Snapshot
             do {
-                current = try env.downloads.current()
+                current = try tracker.current().filter { include($0.key) }
             } catch {
-                env.logger.warning("Downloads scan: cannot read \(env.downloads.folder.path): \(error.localizedDescription)")
+                env.logger.warning("\(trigger.title) scan: cannot read \(place): \(error.localizedDescription)")
                 break
             }
-            guard let seen = env.downloads.loadSeen() else {
+            guard let seen = tracker.loadSeen() else {
                 // First run: everything already there counts as seen.
-                try? env.downloads.save(current)
-                env.logger.info("Downloads watcher started: \(current.count) existing item(s) marked as seen")
+                try? tracker.save(current)
+                env.logger.info("\(trigger.title) watcher started for \(place): \(current.count) existing item(s) marked as seen")
                 break
             }
             let new = DownloadsTracker.newItems(in: current, since: seen)
             guard !new.isEmpty else {
-                if seen != current { try? env.downloads.save(current) }   // forget items that left the folder
+                if seen != current { try? tracker.save(current) }   // forget items that left the folder
                 break
             }
 
-            let settled = await env.downloads.waitUntilSettled(new, interval: env.settleInterval, timeout: env.settleTimeout)
+            let settled = await tracker.waitUntilSettled(new, interval: interval, timeout: env.settleTimeout)
             // Record what is scanned *before* scanning: an item that changes during the scan is new again.
             var nowSeen = seen.filter { current[$0.key] != nil }
             nowSeen.merge(settled) { _, latest in latest }
-            try? env.downloads.save(nowSeen)
+            try? tracker.save(nowSeen)
 
             let names = settled.keys.sorted()
             guard !names.isEmpty else { continue }
-            env.logger.info("Downloads scan starting: \(names.joined(separator: ", "))")
-            let targets = names.map { ScanTarget.path(env.downloads.folder.appendingPathComponent($0)) }
+            env.logger.info("\(trigger.title) scan starting in \(place): \(names.joined(separator: ", "))")
+            let targets = names.map { ScanTarget.path(tracker.folder.appendingPathComponent($0)) }
             var session = await env.coordinator.run(targets: targets) { _ in }
-            session.trigger = .downloads
+            session.trigger = trigger
             await finish(session, previous: nil, env)
             sessions.append(session)
         }
         return sessions
+    }
+
+    // MARK: - New apps
+
+    static func runNewApps(_ env: BackgroundScanEnvironment) async -> [ScanSession] {
+        guard env.settings.watchNewApps else {
+            env.logger.info("New-app scan skipped: it is turned off in Settings")
+            return []
+        }
+        var sessions: [ScanSession] = []
+        for tracker in env.appTrackers where FileManager.default.fileExists(atPath: tracker.folder.path) {
+            sessions += await scanNewItems(in: tracker, include: { $0.lowercased().hasSuffix(".app") }, trigger: .newApps,
+                                           interval: env.appSettleInterval, env)
+        }
+        return sessions
+    }
+
+    // MARK: - Startup watch
+
+    static func runStartupWatch(_ env: BackgroundScanEnvironment) async -> [ScanSession] {
+        guard env.settings.watchStartupItems else {
+            env.logger.info("Startup watch skipped: it is turned off in Settings")
+            return []
+        }
+        guard let tracker = env.startupTracker else { return [] }
+        try? await Task.sleep(for: env.startupSettle)
+        var session = await env.coordinator.run(targets: [.startupItems]) { _ in }
+        session.trigger = .startupItems
+        tracker.apply(to: &session)
+        // Only worth keeping when something is new or different (a removed item isn't).
+        guard !newStartupItems(in: session).isEmpty else {
+            env.logger.info("Startup watch: nothing new")
+            return []
+        }
+        await finish(session, previous: nil, env)
+        return [session]
+    }
+
+    /// Startup items that are new or changed in this scan, without MacScan's own agents.
+    static func newStartupItems(in session: ScanSession) -> [Finding] {
+        session.findings.filter { $0.change != nil && !Self.isMacScanItem($0) }
+    }
+
+    static func isMacScanItem(_ finding: Finding) -> Bool {
+        (finding.path as NSString).lastPathComponent.hasPrefix(BackgroundAgent.labelPrefix)
+    }
+
+    /// "com.foo.updater" for a launch item plist, the file name otherwise.
+    static func itemName(_ finding: Finding) -> String {
+        let name = (finding.path as NSString).lastPathComponent
+        return name.hasSuffix(".plist") ? String(name.dropLast(6)) : name
     }
 
     // MARK: - Results
@@ -246,6 +315,7 @@ public enum BackgroundScanWorker {
     /// A scheduled scan reports only results that the previous scheduled scan didn't already have,
     /// so a known warning doesn't notify again every day.
     static func notification(for session: ScanSession, previous: ScanSession?) -> BackgroundNotification? {
+        if session.trigger == .startupItems { return startupNotification(for: session) }
         func key(_ f: Finding) -> String {
             // VirusTotal reasons contain changing counts.
             f.engine == .virustotal ? "\(f.engine.rawValue)|\(f.path)" : "\(f.engine.rawValue)|\(f.path)|\(f.reason)"
@@ -289,10 +359,35 @@ public enum BackgroundScanWorker {
         if units.count > 3 { names += " and \(units.count - 3) more" }
         let body: String = switch session.trigger {
         case .downloads: "In Downloads: \(names)"
+        case .newApps: "New or updated app: \(names)" + (flagged.first.map { " · " + $0.reason } ?? "")
+        case .startupItems: names
         case .scheduled: previous == nil ? "Scheduled scan: \(names)" : "New since the last scheduled scan: \(names)"
         case nil: names
         }
-        let suffix = startup > 0 ? " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" : ""
+        let suffix = startup > 0 && session.trigger != .newApps ? " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" : ""
         return BackgroundNotification(title: title, body: body + suffix + changeNote, sessionID: session.id)
+    }
+
+    /// "New startup item: com.foo.updater" with why it's worth a look, or who signed it.
+    static func startupNotification(for session: ScanSession) -> BackgroundNotification? {
+        let items = newStartupItems(in: session)
+        guard let first = items.first else { return nil }
+        let flagged = items.filter { $0.severity > .clean }
+        let lead = flagged.first ?? first
+        let isNew = lead.change == .new
+        let title: String
+        if items.count == 1 {
+            title = "\(isNew ? "New" : "Changed") startup item\(lead.severity > .clean ? " to review" : ""): \(itemName(lead))"
+        } else {
+            title = flagged.isEmpty
+                ? "\(items.count) new or changed startup items"
+                : "\(items.count) new or changed startup items, \(flagged.count) to review"
+        }
+        var body = lead.reason
+        if items.count > 1 {
+            let others = items.filter { $0 != lead }.prefix(3).map(itemName).joined(separator: ", ")
+            body += " · Also: \(others)" + (items.count > 4 ? " and \(items.count - 4) more" : "")
+        }
+        return BackgroundNotification(title: title, body: body, sessionID: session.id)
     }
 }

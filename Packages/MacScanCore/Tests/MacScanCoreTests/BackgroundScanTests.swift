@@ -31,6 +31,16 @@ final class FakeLaunchctl: LaunchctlRunning, @unchecked Sendable {
     }
 }
 
+extension ScanSettings {
+    /// Defaults with the startup and new-app watchers off, for tests about the other agents.
+    static var noWatchers: ScanSettings {
+        var s = ScanSettings()
+        s.watchStartupItems = false
+        s.watchNewApps = false
+        return s
+    }
+}
+
 final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
     private let lock = NSLock()
     private var _sent: [BackgroundNotification] = []
@@ -60,7 +70,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         let dir = try TempDir()
         let launchctl = FakeLaunchctl()
         let agent = makeAgent(dir, launchctl: launchctl)
-        try await agent.sync(settings: ScanSettings(), logger: logger)
+        try await agent.sync(settings: ScanSettings.noWatchers, logger: logger)
         #expect(launchctl.calls.isEmpty)
         #expect(!agent.isInstalled(.scheduled))
         #expect(!agent.isInstalled(.downloads))
@@ -70,7 +80,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         let dir = try TempDir()
         let launchctl = FakeLaunchctl()
         let agent = makeAgent(dir, launchctl: launchctl)
-        var settings = ScanSettings()
+        var settings = ScanSettings.noWatchers
         settings.scheduledScanEnabled = true
         settings.scheduleFrequency = .weekly
         settings.scheduleWeekday = 7
@@ -93,7 +103,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
     @Test func dailyScheduleHasNoWeekdayAndClampsTheTime() throws {
         let dir = try TempDir()
         let agent = makeAgent(dir, launchctl: FakeLaunchctl())
-        var settings = ScanSettings()
+        var settings = ScanSettings.noWatchers
         settings.scheduledScanEnabled = true
         settings.scheduleHour = 99
         settings.scheduleMinute = -5
@@ -105,7 +115,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         let dir = try TempDir()
         let launchctl = FakeLaunchctl()
         let agent = makeAgent(dir, launchctl: launchctl)
-        var settings = ScanSettings()
+        var settings = ScanSettings.noWatchers
         settings.watchDownloads = true
         try await agent.sync(settings: settings, logger: logger)
 
@@ -120,7 +130,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         let dir = try TempDir()
         let launchctl = FakeLaunchctl()
         let agent = makeAgent(dir, launchctl: launchctl)
-        var settings = ScanSettings()
+        var settings = ScanSettings.noWatchers
         settings.scheduledScanEnabled = true
         settings.watchDownloads = true
         try await agent.sync(settings: settings, logger: logger)
@@ -142,7 +152,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
 
         // Turning both off unloads and deletes both plists, and nothing else in the folder.
         let other = try dir.write("LaunchAgents/com.example.other.plist", "keep me")
-        try await agent.sync(settings: ScanSettings(), logger: logger)
+        try await agent.sync(settings: ScanSettings.noWatchers, logger: logger)
         #expect(!agent.isInstalled(.scheduled))
         #expect(!agent.isInstalled(.downloads))
         #expect(FileManager.default.fileExists(atPath: other.path))
@@ -151,7 +161,7 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
 
     @Test func bootstrapIsRetriedAndAFailureIsReported() async throws {
         let dir = try TempDir()
-        var settings = ScanSettings()
+        var settings = ScanSettings.noWatchers
         settings.watchDownloads = true
 
         let flaky = FakeLaunchctl()
@@ -173,11 +183,12 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         #expect(settings.maxFileSizeMB == 250)
         #expect(!settings.scheduledScanEnabled)
         #expect(!settings.watchDownloads)
-        #expect(!settings.backgroundScansEnabled)
+        // The startup and new-app watchers are on unless turned off.
+        #expect(settings.watchStartupItems && settings.watchNewApps && settings.backgroundScansEnabled)
         #expect(settings.scheduleFrequency == .daily)
         #expect(settings.scheduleHour == 12)
 
-        var changed = ScanSettings()
+        var changed = ScanSettings.noWatchers
         changed.watchDownloads = true
         changed.scheduleFrequency = .weekly
         let roundTrip = try JSONDecoder().decode(ScanSettings.self, from: JSONEncoder().encode(changed))
@@ -300,6 +311,9 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         )
         env.settleInterval = .milliseconds(20)
         env.settleTimeout = .seconds(5)
+        env.appSettleInterval = .milliseconds(20)
+        env.startupSettle = .zero
+        env.appTrackers = [DownloadsTracker(folder: dir.url.appendingPathComponent("Applications"), stateFile: dir.url.appendingPathComponent("apps-seen.json"))]
         var fixture = Fixture(dir: dir, env: env)
         fixture.env.notifier = fixture.notifier
         return fixture
@@ -527,5 +541,103 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         let all = store.loadAll()
         #expect(all.count == 2)
         #expect(all.contains { $0.trigger == nil })
+    }
+}
+
+@Suite struct LiveWatcherTests {
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+
+    func makeEnv(_ dir: TempDir, notifier: NotificationRecorder, configure: (inout ScanSettings) -> Void = { _ in }) throws -> BackgroundScanEnvironment {
+        var settings = ScanSettings()
+        configure(&settings)
+        let locations = PersistenceLocations(home: dir.url.appendingPathComponent("Home"), root: dir.url.appendingPathComponent("Root"), includeCrontab: false)
+        try FileManager.default.createDirectory(at: dir.url.appendingPathComponent("Applications"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: dir.url.appendingPathComponent("Home/Library/LaunchAgents"), withIntermediateDirectories: true)
+        var env = BackgroundScanEnvironment(
+            settings: settings, customFolders: [],
+            coordinator: ScanCoordinator(engines: [FakeEngine()], settings: settings, logger: logger, persistenceLocations: locations),
+            historyStore: HistoryStore(directory: dir.url.appendingPathComponent("History")),
+            downloads: DownloadsTracker(folder: dir.url.appendingPathComponent("Downloads"), stateFile: dir.url.appendingPathComponent("seen.json")),
+            notifier: notifier, logger: logger)
+        env.appTrackers = [DownloadsTracker(folder: dir.url.appendingPathComponent("Applications"), stateFile: dir.url.appendingPathComponent("apps-seen.json"))]
+        env.appSettleInterval = .milliseconds(20)
+        env.settleTimeout = .seconds(5)
+        env.startupSettle = .zero
+        env.startupTracker = StartupChangeTracker(file: dir.url.appendingPathComponent("startup-baseline.json"))
+        return env
+    }
+
+    func writeAgent(_ dir: TempDir, label: String, program: String) throws {
+        let plist: [String: Any] = ["Label": label, "ProgramArguments": [program], "RunAtLoad": true]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: dir.url.appendingPathComponent("Home/Library/LaunchAgents/\(label).plist"))
+    }
+
+    @Test func newAppsAreScannedAndOnlyFlaggedOnesNotify() async throws {
+        let dir = try TempDir()
+        let notifier = NotificationRecorder()
+        let env = try makeEnv(dir, notifier: notifier)
+        try dir.write("Applications/Old.app/Contents/MacOS/Old", "x")
+
+        // First run only remembers what's there.
+        #expect(await BackgroundScanWorker.run(.newApps, environment: env).isEmpty)
+
+        try dir.write("Applications/Fine.app/Contents/MacOS/Fine", "x")
+        try dir.write("Applications/notes.txt", "not an app")
+        let clean = await BackgroundScanWorker.run(.newApps, environment: env)
+        #expect(clean.count == 1 && clean.first?.trigger == .newApps && clean.first?.flagged.isEmpty == true)
+        #expect(notifier.sent.isEmpty)
+
+        try dir.write("Applications/Evil.app/Contents/MacOS/bad", "x")
+        let flagged = await BackgroundScanWorker.run(.newApps, environment: env)
+        #expect(flagged.first?.flagged.count == 1)
+        let note = try #require(notifier.sent.first)
+        #expect(note.title == "MacScan found 1 threat")
+        #expect(note.body == "New or updated app: Evil.app · bad file")
+
+        // Turned off: nothing happens.
+        var off = env
+        off.settings.watchNewApps = false
+        try dir.write("Applications/bad2.app/Contents/MacOS/bad", "x")
+        #expect(await BackgroundScanWorker.run(.newApps, environment: off).isEmpty)
+    }
+
+    @Test func newStartupItemNotifiesButMacScansOwnDoesNot() async throws {
+        let dir = try TempDir()
+        let notifier = NotificationRecorder()
+        let env = try makeEnv(dir, notifier: notifier)
+        try writeAgent(dir, label: "com.example.known", program: "/usr/bin/true")
+
+        // First run saves the starting point; nothing is new yet.
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+
+        // MacScan's own agent appearing is not worth an alert.
+        try writeAgent(dir, label: BackgroundAgent.label(for: .newApps), program: "/usr/bin/true")
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+        #expect(notifier.sent.isEmpty)
+
+        try writeAgent(dir, label: "com.foo.updater", program: "/tmp/updater.sh")
+        let sessions = await BackgroundScanWorker.run(.startupItems, environment: env)
+        let session = try #require(sessions.first)
+        #expect(session.trigger == .startupItems)
+        #expect(env.historyStore.loadAll().map(\.id) == [session.id])
+        let note = try #require(notifier.sent.first)
+        #expect(note.title.hasPrefix("New startup item") && note.title.hasSuffix(": com.foo.updater"))
+        #expect(note.sessionID == session.id)
+
+        // Nothing changed since: no scan saved, no alert.
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+        #expect(notifier.sent.count == 1)
+    }
+
+    @Test func watcherAgentsWatchTheRightFolders() throws {
+        let agent = BackgroundAgent(executable: URL(fileURLWithPath: "/Applications/MacScan.app/Contents/MacOS/MacScan"),
+                                    startupFolders: [URL(fileURLWithPath: "/a")], appFolders: [URL(fileURLWithPath: "/b"), URL(fileURLWithPath: "/c")])
+        let settings = ScanSettings()
+        #expect(agent.job(for: .startupItems, settings: settings)?["WatchPaths"] as? [String] == ["/a"])
+        #expect(agent.job(for: .newApps, settings: settings)?["WatchPaths"] as? [String] == ["/b", "/c"])
+        #expect((agent.job(for: .newApps, settings: settings)?["ProgramArguments"] as? [String])?.last == "new-apps")
+        #expect(agent.job(for: .startupItems, settings: .noWatchers) == nil)
+        #expect(BackgroundAgent.label(for: .startupItems) == "com.local.MacScan.startup-watcher")
     }
 }

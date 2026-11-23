@@ -401,17 +401,26 @@ Whatever the list says, MacScan refuses to remove top-level or system locations 
 
 ### Background scans
 
-Both options are in *Settings › Background* and are off by default.
+The scheduled scan and the Downloads watcher are in *Settings › Background* and are off by default.
+The two live-protection watchers below are on by default.
 
 - **Scan on a schedule** runs a **Full Check** (plus your scan folders) every day or every week at the
   time you pick, and compares it with the last Full Check. Set "What to scan" to *Applications and Startup
   Items only* for the older, smaller scan.
+- **Alert on new startup items** (on by default) runs a Startup Items scan whenever something changes in
+  `~/Library/LaunchAgents`, `/Library/LaunchAgents` or `/Library/LaunchDaemons`, and tells you about items
+  that are new or changed since the last check ("New startup item: com.foo.updater", with what it runs or
+  who signed it). MacScan's own agents don't count. Scans that find nothing new aren't saved.
+- **Scan new apps** (on by default) scans apps that arrive in `/Applications` or `~/Applications` once
+  they stop changing. You only get a notification when something is flagged. The apps already there when
+  it's turned on are marked as seen (`apps-seen-*.json`).
 - **Scan new downloads** scans each new item that arrives in `~/Downloads`. Items that were already there
   when you turned it on are not scanned, and unfinished downloads (`.crdownload`, `.download`, `.part`)
   wait until they are complete.
 
 How it works: MacScan installs its own per-user launch agents in `~/Library/LaunchAgents`
-(`com.local.MacScan.scheduled-scan.plist`, `com.local.MacScan.downloads-watcher.plist`). launchd starts the
+(`com.local.MacScan.scheduled-scan.plist`, `com.local.MacScan.downloads-watcher.plist`,
+`com.local.MacScan.startup-watcher.plist`, `com.local.MacScan.apps-watcher.plist`). launchd starts the
 MacScan executable in a headless mode (`--macscan-background-scan`) when a scan is due, and it exits when
 the scan ends. No MacScan process stays running in between. Turning an option off unloads and deletes
 its agent.
