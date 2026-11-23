@@ -43,46 +43,71 @@ struct ResultsView: View {
                 FullCheckChangesView(info: info)
                 Divider()
             }
-            HStack {
-                Picker("Show", selection: $filter) {
-                    ForEach(SeverityFilter.allCases) { f in
-                        Text(label(for: f)).tag(f)
+            HStack(spacing: 6) {
+                ForEach(SeverityFilter.allCases) { f in
+                    FilterCapsule(title: f.title, count: f == .all ? scoped.count : count(f.severity!),
+                                  color: f.severity?.color ?? .accentColor, isOn: filter == f) {
+                        filter = f
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .frame(maxWidth: 420)
                 if hasChanges {
                     Toggle("New or changed (\(scoped.filter { $0.change != nil }.count))", isOn: $changedOnly)
-                        .toggleStyle(.checkbox)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .padding(.leading, 8)
                         .help("Show only startup items or browser extensions that were added or changed since the previous scan of that kind")
                 }
                 Spacer()
-                TextField("Filter by path or reason", text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 240)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Filter by path or reason", text: $search)
+                        .textFieldStyle(.plain)
+                    if !search.isEmpty {
+                        Button {
+                            search = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: 260)
+                .glassCard(radius: 14)
             }
-            .padding(8)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
 
             Table(filtered, selection: $selection, sortOrder: $sortOrder) {
                 TableColumn("Severity", value: \.severity) { f in
-                    SeverityBadge(severity: f.severity)
+                    HStack(spacing: 6) {
+                        IconTile(symbol: f.severity.symbol, color: f.severity.color, size: 20)
+                        Text(f.severity.title)
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(f.severity.color)
+                    }
                 }
-                .width(min: 80, ideal: 90, max: 110)
+                .width(min: 90, ideal: 105, max: 120)
 
                 TableColumn("Path", value: \.path) { f in
                     let quarantined = state.isQuarantined(f.path)
                     let trashed = state.trashedPaths.contains(f.path) || quarantined
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(f.fileName)
-                            .strikethrough(trashed)
-                            .lineLimit(1)
-                        Text(quarantined ? "Moved to Quarantine" : trashed ? "Moved to Trash" : (f.path as NSString).deletingLastPathComponent)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                    HStack(spacing: 8) {
+                        FileIcon(path: f.path, size: 22)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(f.fileName)
+                                .fontWeight(.medium)
+                                .strikethrough(trashed)
+                                .lineLimit(1)
+                            Text(quarantined ? "Moved to Quarantine" : trashed ? "Moved to Trash" : (f.path as NSString).deletingLastPathComponent)
+                                .font(.caption)
+                                .foregroundStyle(trashed ? AnyShapeStyle(Color.purple) : AnyShapeStyle(.secondary))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
+                    .opacity(trashed ? 0.6 : 1)
                     .help(f.path)
                 }
                 .width(min: 200, ideal: 320)
@@ -115,19 +140,11 @@ struct ResultsView: View {
             }
 
             if let f = selectedFinding {
-                Divider()
                 FindingDetailView(finding: f, sessionID: session.id)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-    }
-
-    private func label(for f: SeverityFilter) -> String {
-        switch f {
-        case .all: "All (\(scoped.count))"
-        case .threat: "Threats (\(count(.threat)))"
-        case .warning: "Warnings (\(count(.warning)))"
-        case .clean: "Clean (\(count(.clean)))"
-        }
+        .animation(.smooth(duration: 0.25), value: selectedFinding?.id)
     }
 
     private func count(_ severity: Severity) -> Int {
@@ -269,16 +286,17 @@ struct FullCheckChangesView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .glassCard(radius: 16)
+        .padding(.horizontal, 8)
         .padding(.bottom, 8)
     }
 
     @ViewBuilder
     private func row(_ change: FullCheckChange) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: change.kind.symbol)
-                .foregroundStyle(change.kind.color)
-                .frame(width: 16)
+        HStack(alignment: .center, spacing: 8) {
+            IconTile(symbol: change.kind.symbol, color: change.kind.color, size: 20)
             Text(change.kind.label).font(.caption.weight(.semibold)).foregroundStyle(change.kind.color)
                 .frame(width: 92, alignment: .leading)
             Text(change.title).font(.callout.weight(.medium))
@@ -288,12 +306,12 @@ struct FullCheckChangesView: View {
             Spacer(minLength: 8)
             switch change.kind {
             case .newPermission:
-                Button("Privacy") { state.selectedSection = .privacy }.controlSize(.small)
+                Button("Privacy") { state.selectedSection = .privacy }.controlSize(.small).buttonStyle(.glass)
             case .settingChanged, .settingFixed:
-                Button("Security") { state.selectedSection = .security }.controlSize(.small)
+                Button("Security") { state.selectedSection = .security }.controlSize(.small).buttonStyle(.glass)
             case .newApp:
                 if let path = change.path {
-                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }.controlSize(.small)
+                    Button("Reveal") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)]) }.controlSize(.small).buttonStyle(.glass)
                 }
             }
         }
@@ -312,7 +330,7 @@ extension FullCheckChange.Kind {
 
     var symbol: String {
         switch self {
-        case .newApp: "app.badge"
+        case .newApp: "app.badge.fill"
         case .newPermission: "hand.raised.fill"
         case .settingChanged: "exclamationmark.triangle.fill"
         case .settingFixed: "checkmark.circle.fill"
@@ -408,60 +426,154 @@ struct FindingDetailView: View {
     let sessionID: UUID
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    SeverityBadge(severity: finding.severity)
-                    if let change = finding.change { ChangeBadge(change: change) }
-                    Text(finding.reason).font(.headline).textSelection(.enabled)
-                }
-                Text(finding.path)
-                    .font(.callout.monospaced())
-                    .textSelection(.enabled)
-                    .lineLimit(2)
-                if let detail = finding.detail, !detail.isEmpty {
-                    Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
+                FileIcon(path: finding.path, size: 44)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(finding.fileName).font(.title3.weight(.semibold)).lineLimit(1).textSelection(.enabled)
+                        CountChip(symbol: finding.severity.symbol, text: finding.severity.title, color: finding.severity.color)
+                        if let change = finding.change { ChangeBadge(change: change) }
+                    }
+                    Text(finding.reason)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(finding.severity == .clean ? AnyShapeStyle(.secondary) : AnyShapeStyle(finding.severity.color))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                if let hash = finding.sha256 {
-                    Text("SHA-256: \(hash)")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+                Spacer(minLength: 0)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
 
-            VStack(alignment: .trailing, spacing: 6) {
-                Button("Reveal in Finder") { state.reveal(finding) }
-                Button("VirusTotal Lookup") { state.lookUpOnVirusTotal(finding, sessionID: sessionID) }
-                    .disabled(!state.hasVirusTotalKey || state.vtLookupsInFlight.contains(finding.id))
-                    .help(state.hasVirusTotalKey ? "Sends only the SHA-256 hash" : "Add your API key in Settings › VirusTotal")
-                Button("Ignore") { state.ignore(finding, sessionID: sessionID) }
-                    .disabled(finding.severity == .clean)
-                if let app = state.owningApp(of: finding) {
-                    Button("Uninstall App…") { state.openUninstaller(for: app) }
-                        .help("Remove \(app.lastPathComponent) and everything that belongs to it")
+            ScrollView {
+                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 5) {
+                    fact("Found by", finding.engine.title)
+                    fact("Path", finding.path, mono: true)
+                    if let detail = finding.detail, !detail.isEmpty { fact("Details", detail) }
+                    if let hash = finding.sha256 { fact("SHA-256", hash, mono: true) }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxHeight: 110)
+
+            HStack(spacing: 8) {
+                Button {
+                    state.reveal(finding)
+                } label: {
+                    Label("Reveal", systemImage: "folder")
+                }
+                Button {
+                    state.lookUpOnVirusTotal(finding, sessionID: sessionID)
+                } label: {
+                    Label("VirusTotal", systemImage: "globe")
+                }
+                .disabled(!state.hasVirusTotalKey || state.vtLookupsInFlight.contains(finding.id))
+                .help(state.hasVirusTotalKey ? "Sends only the SHA-256 hash" : "Add your API key in Settings › VirusTotal")
+                Button {
+                    state.ignore(finding, sessionID: sessionID)
+                } label: {
+                    Label("Ignore", systemImage: "eye.slash")
+                }
+                .disabled(finding.severity == .clean)
+                if let app = state.owningApp(of: finding) {
+                    Button {
+                        state.openUninstaller(for: app)
+                    } label: {
+                        Label("Uninstall App…", systemImage: "trash.square")
+                    }
+                    .help("Remove \(app.lastPathComponent) and everything that belongs to it")
+                }
+                Spacer()
                 if state.isOrphanedLaunchItem(finding) {
-                    Button("Remove Startup Item…", role: .destructive) { state.requestOrphanRemoval(finding) }
-                        .disabled(state.orphanRemovalsInFlight.contains(finding.path))
-                        .help("Stops this leftover startup item and moves it to the Trash. Its program no longer exists.")
+                    Button(role: .destructive) {
+                        state.requestOrphanRemoval(finding)
+                    } label: {
+                        Label("Remove Startup Item…", systemImage: "trash")
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.red)
+                    .disabled(state.orphanRemovalsInFlight.contains(finding.path))
+                    .help("Stops this leftover startup item and moves it to the Trash. Its program no longer exists.")
                 } else {
-                    Button("Quarantine…") { state.requestQuarantine(finding, sessionID: sessionID) }
-                        .disabled(state.isRemoved(finding.path))
-                        .help("Moves the item into MacScan's locked quarantine. You can restore it later.")
-                    Button("Move to Trash…", role: .destructive) { state.requestTrash(finding, sessionID: sessionID) }
-                        .disabled(state.isRemoved(finding.path))
+                    Button {
+                        state.requestQuarantine(finding, sessionID: sessionID)
+                    } label: {
+                        Label("Quarantine…", systemImage: "archivebox")
+                    }
+                    .disabled(state.isRemoved(finding.path))
+                    .help("Moves the item into MacScan's locked quarantine. You can restore it later.")
+                    Button(role: .destructive) {
+                        state.requestTrash(finding, sessionID: sessionID)
+                    } label: {
+                        Label("Move to Trash…", systemImage: "trash")
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.red)
+                    .disabled(state.isRemoved(finding.path))
                 }
             }
-            .controlSize(.small)
+            .buttonStyle(.glass)
         }
+        .padding(16)
+        .glassCard(tint: finding.severity == .clean ? nil : finding.severity.color, radius: 20)
         .padding(12)
-        .frame(maxHeight: 200)
+    }
+
+    @ViewBuilder
+    private func fact(_ label: String, _ value: String, mono: Bool = false) -> some View {
+        GridRow {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .gridColumnAlignment(.trailing)
+            Text(value)
+                .font(mono ? .caption.monospaced() : .callout)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// The Finder icon of a file, or a plain document icon if it's gone.
+struct FileIcon: View {
+    let path: String
+    var size: CGFloat = 22
+
+    var body: some View {
+        Image(nsImage: NSWorkspace.shared.icon(forFile: path))
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+    }
+}
+
+/// A rounded filter button with a count, e.g. "Warnings 4".
+struct FilterCapsule: View {
+    let title: String
+    let count: Int
+    let color: Color
+    let isOn: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Text(title).fontWeight(.medium)
+                Text(count.formatted())
+                    .monospacedDigit()
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background((isOn ? Color.white : color).opacity(isOn ? 0.25 : 0.15), in: Capsule())
+            }
+            .foregroundStyle(isOn ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(isOn ? AnyShapeStyle(color.gradient) : AnyShapeStyle(.clear), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(isOn ? .regular.tint(color.opacity(0.4)).interactive() : .regular.interactive(), in: .capsule)
+        .animation(.smooth(duration: 0.2), value: isOn)
     }
 }
 

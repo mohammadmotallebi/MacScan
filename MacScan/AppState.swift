@@ -29,6 +29,16 @@ enum SeverityFilter: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The severity this filter shows, or nil for All.
+    var severity: Severity? {
+        switch self {
+        case .all: nil
+        case .threat: .threat
+        case .warning: .warning
+        case .clean: .clean
+        }
+    }
+
     func matches(_ s: Severity) -> Bool {
         switch self {
         case .all: true

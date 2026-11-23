@@ -53,25 +53,21 @@ struct UninstallView: View {
             Group {
                 if let app = model.selectedApp {
                     if let reason = app.protectionReason {
-                        ContentUnavailableView {
-                            Label("Can't uninstall \(app.name)", systemImage: "lock.fill")
-                        } description: {
-                            Text("\(reason). MacScan won't remove it.")
-                        }
+                        SectionEmptyState(symbol: "lock.fill", color: .gray, title: "Can't uninstall \(app.name)",
+                                          message: "\(reason). MacScan won't remove it.")
                     } else if model.isFinding {
-                        ProgressView("Looking for everything that belongs to \(app.name)…")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        SectionEmptyState(symbol: "magnifyingglass", color: .red, title: "Looking for \(app.name)'s files…",
+                                          message: "Startup items, helpers, settings, caches and everything else it put on this Mac.", isBusy: true)
                     } else if let plan = model.plan {
                         UninstallPlanView(plan: plan)
                     } else {
                         Color.clear
                     }
                 } else {
-                    ContentUnavailableView {
-                        Label("Uninstall an app", systemImage: "trash.square")
-                    } description: {
-                        Text("Choose an app on the left, or drop one here. MacScan finds the app, its startup items, helpers, settings, caches and other files, and moves the ones you choose to the Trash.")
-                    }
+                    SectionEmptyState(
+                        symbol: "trash.fill", color: .red, title: "Uninstall an app",
+                        message: "Choose an app on the left, or drop one here. MacScan finds the app, its startup items, helpers, settings, caches and other files, and moves the ones you choose to the Trash.",
+                        buttonTitle: "Choose App…", action: { model.chooseApp() })
                 }
             }
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
@@ -142,26 +138,34 @@ struct UninstallPlanView: View {
 
         VStack(spacing: 0) {
             // Header
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Image(nsImage: plan.app.icon)
                     .resizable()
-                    .frame(width: 48, height: 48)
+                    .frame(width: 64, height: 64)
+                    .shadow(color: .black.opacity(0.2), radius: 6, y: 2)
                     .opacity(plan.app.isMissing ? 0.5 : 1)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plan.app.name).font(.title2.weight(.semibold))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(plan.app.name).font(.system(size: 22, weight: .bold, design: .rounded))
                     Text([plan.app.version.map { "Version \($0)" }, plan.app.bundleID].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
                     Text(plan.app.isMissing ? "The app is already removed. These are the files it left behind."
                                             : CodeSigning.status(of: plan.app.url).description)
                         .font(.caption).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        CountChip(symbol: "doc.on.doc.fill", text: "\(plan.leftovers.count) items", color: .red)
+                        CountChip(symbol: "internaldrive.fill", text: plan.totalSize.formatted(.byteCount(style: .file)), color: .gray)
+                        if !plan.launchJobs.isEmpty {
+                            CountChip(symbol: "gearshape.2.fill", text: "\(plan.launchJobs.count) background", color: .orange)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
                 Spacer()
-                VStack(alignment: .trailing) {
-                    Text("\(plan.leftovers.count) items").font(.headline)
-                    Text(plan.totalSize.formatted(.byteCount(style: .file))).foregroundStyle(.secondary)
-                }
             }
+            .padding(18)
+            .glassCard(tint: .red, radius: 22)
             .padding(12)
+            .background(SectionWash(color: .red))
 
             if plan.app.isInTrash {
                 Label("This app is already in the Trash. Its items will be deleted permanently.", systemImage: "trash.fill")
@@ -214,13 +218,15 @@ struct UninstallPlanView: View {
             // Checklist
             List {
                 ForEach(groups, id: \.0) { category, items in
-                    Section(category.title) {
+                    Section {
                         ForEach(items) { item in
                             LeftoverRow(item: item, isOn: Binding(
                                 get: { model.selection.contains(item.path) },
                                 set: { model.setSelected(item, $0) }
                             ))
                         }
+                    } header: {
+                        Text(category.title).font(.headline).foregroundStyle(.primary)
                     }
                 }
             }
@@ -229,7 +235,9 @@ struct UninstallPlanView: View {
             // Footer
             HStack(spacing: 12) {
                 Button("All") { model.selectAll() }
+                    .buttonStyle(.glass)
                 Button("None") { model.selectNone() }
+                    .buttonStyle(.glass)
                 Divider().frame(height: 16)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("\(chosen.count) of \(plan.leftovers.count) selected · \(chosenSize.formatted(.byteCount(style: .file)))")
@@ -251,11 +259,12 @@ struct UninstallPlanView: View {
                 } label: {
                     Label("Uninstall…", systemImage: "trash")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
                 .tint(.red)
+                .controlSize(.large)
                 .disabled(chosen.isEmpty || model.isUninstalling)
             }
-            .padding(10)
+            .padding(12)
         }
         .confirmationDialog("Uninstall \(plan.app.name)?", isPresented: $confirming) {
             Button(deleting == chosen.count ? "Delete \(chosen.count) Items Permanently" : (deleting > 0 ? "Remove \(chosen.count) Items" : "Move \(chosen.count) Items to Trash"),

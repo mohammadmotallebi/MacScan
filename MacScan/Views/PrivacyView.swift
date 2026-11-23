@@ -9,42 +9,17 @@ struct PrivacyView: View {
     var body: some View {
         @Bindable var model = state.privacy
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                if let report = model.report, !report.grants.isEmpty {
-                    summary(report)
-                } else {
-                    Text(model.isChecking ? "Checking…" : model.report == nil ? "Not checked yet" : "Nothing to show")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.isChecking { ProgressView().controlSize(.small) }
-                if let date = model.lastChecked {
-                    Text("Checked \(date.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Flagged only", isOn: $model.flaggedOnly)
-                    .toggleStyle(.checkbox)
-                    .disabled(model.report?.grants.isEmpty != false)
-                if !model.leftovers.isEmpty {
-                    Button("Remove Leftovers…") { model.pendingRemoval = model.leftovers }
-                        .disabled(model.isChecking || model.isRemoving)
-                        .help("Remove the permissions of apps that are no longer installed")
-                }
-                Button("Check Again") { model.refresh() }
-                    .disabled(model.isChecking || model.isRemoving)
-            }
-            .padding(12)
+            header(model)
             Divider()
 
             if let report = model.report {
                 content(report, model: model)
             } else {
-                ContentUnavailableView {
-                    Label("Privacy permissions", systemImage: "hand.raised")
-                } description: {
-                    Text("Shows which apps can use your camera, microphone, screen and files.\nMacScan only reads the list.")
-                }
+                SectionEmptyState(
+                    symbol: "hand.raised.fill", color: .pink,
+                    title: model.isChecking ? "Reading permissions…" : "Privacy permissions",
+                    message: "Shows which apps can use your camera, microphone, screen and files. MacScan only reads the list.",
+                    isBusy: model.isChecking, buttonTitle: "Check Privacy", action: { model.refresh() })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -77,19 +52,16 @@ struct PrivacyView: View {
     private func content(_ report: PrivacyReport, model: PrivacyModel) -> some View {
         if report.grants.isEmpty {
             if report.needsFullDiskAccess {
-                ContentUnavailableView {
-                    Label("Full Disk Access needed", systemImage: "lock.shield")
-                } description: {
-                    Text("macOS keeps the list of permissions private.\nGive MacScan Full Disk Access, reopen it, and check again.")
-                } actions: {
-                    Button("Show Me How") { state.fdaPrompt = FDAPrompt(paths: []) }
-                }
+                SectionEmptyState(
+                    symbol: "lock.trianglebadge.exclamationmark.fill", color: .orange,
+                    title: "Full Disk Access needed",
+                    message: "macOS keeps the list of permissions private. Give MacScan Full Disk Access, reopen it, and check again.",
+                    buttonTitle: "Show Me How", action: { state.fdaPrompt = FDAPrompt(paths: []) })
             } else {
-                ContentUnavailableView {
-                    Label("Couldn't read the permissions", systemImage: "questionmark.circle")
-                } description: {
-                    Text(problem(report) ?? "macOS's list of permissions is empty.")
-                }
+                SectionEmptyState(
+                    symbol: "questionmark.circle", color: .gray,
+                    title: "Couldn't read the permissions",
+                    message: problem(report) ?? "macOS's list of permissions is empty.")
             }
         } else {
             let shown = model.flaggedOnly ? report.grants.filter { $0.risk != .none } : report.grants
@@ -106,8 +78,8 @@ struct PrivacyView: View {
                 Divider()
             }
             if shown.isEmpty {
-                ContentUnavailableView("Nothing flagged", systemImage: "checkmark.circle",
-                                       description: Text("No app with a permission looks out of place."))
+                SectionEmptyState(symbol: "checkmark.circle.fill", color: .green, title: "Nothing flagged",
+                                  message: "No app with a permission looks out of place.")
             } else {
                 List {
                     ForEach(PrivacyPermission.allCases) { permission in
@@ -122,14 +94,18 @@ struct PrivacyView: View {
                                 }
                             } header: {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Label(permission.title, systemImage: permission.symbol)
-                                        .font(.headline)
-                                        .foregroundStyle(.primary)
+                                    Label {
+                                        Text(permission.title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
+                                    } icon: {
+                                        IconTile(symbol: permission.symbol, color: permission.color, size: 22)
+                                    }
+                                    .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
                                     Text(permission.explanation)
                                         .font(.callout)
                                         .foregroundStyle(.secondary)
                                     Spacer()
                                     Button("Open Settings") { model.openSettings(for: permission) }
+                                        .buttonStyle(.glass)
                                         .controlSize(.small)
                                 }
                                 .padding(.vertical, 2)
@@ -140,12 +116,7 @@ struct PrivacyView: View {
                 .listStyle(.inset)
             }
             Divider()
-            Text("MacScan only reads these permissions, and can remove the ones of apps that are gone. Change the rest in System Settings › Privacy & Security.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            SectionFootnote(text: "MacScan only reads these permissions, and can remove the ones of apps that are gone. Change the rest in System Settings › Privacy & Security.")
         }
     }
 
@@ -157,19 +128,48 @@ struct PrivacyView: View {
         return nil
     }
 
-    @ViewBuilder
-    private func summary(_ report: PrivacyReport) -> some View {
-        let warnings = report.count(.warning)
-        let review = report.count(.review)
-        let apps = Set(report.grants.filter { $0.decision != .denied }.map(\.client)).count
-        Label(warnings > 0 ? "\(warnings) \(warnings == 1 ? "permission needs" : "permissions need") attention"
-              : review > 0 ? "\(review) worth a look" : "Nothing looks out of place",
-              systemImage: warnings > 0 ? "exclamationmark.triangle.fill" : review > 0 ? "eye.fill" : "checkmark.circle.fill")
-            .font(.headline)
-            .foregroundStyle(warnings > 0 ? .orange : review > 0 ? .blue : .green)
-        Text("\(apps) \(apps == 1 ? "app has" : "apps have") a permission")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+    private func header(_ model: PrivacyModel) -> some View {
+        @Bindable var model = model
+        let report = model.report
+        let warnings = report?.count(.warning) ?? 0
+        let review = report?.count(.review) ?? 0
+        let apps = Set((report?.grants ?? []).filter { $0.decision != .denied }.map(\.client)).count
+        let hasRows = report?.grants.isEmpty == false
+        let color: Color = !hasRows ? .pink : warnings > 0 ? .orange : review > 0 ? .blue : .green
+        var subtitle = !hasRows
+            ? (model.isChecking ? "Checking…" : report == nil ? "Not checked yet" : "Nothing to show")
+            : warnings > 0 ? "\(warnings) \(warnings == 1 ? "permission needs" : "permissions need") a look."
+            : review > 0 ? "\(review) worth a look." : "Nothing looks out of place."
+        if let date = model.lastChecked { subtitle += " Checked \(date.formatted(date: .omitted, time: .shortened))." }
+        var chips: [CountChip] = []
+        if hasRows {
+            chips.append(CountChip(symbol: "app.fill", text: "\(apps) app\(apps == 1 ? "" : "s")", color: .pink))
+            if warnings > 0 { chips.append(CountChip(symbol: "exclamationmark.triangle.fill", text: "\(warnings) risky", color: .orange)) }
+            if review > 0 { chips.append(CountChip(symbol: "eye.fill", text: "\(review) to review", color: .blue)) }
+            if !model.leftovers.isEmpty { chips.append(CountChip(symbol: "trash.fill", text: "\(model.leftovers.count) leftover\(model.leftovers.count == 1 ? "" : "s")", color: .gray)) }
+        }
+        return SectionHeader(title: "Privacy", subtitle: subtitle, symbol: "hand.raised.fill", color: color, chips: chips,
+                             isBusy: model.isChecking || model.isRemoving) {
+            Toggle("Flagged only", isOn: $model.flaggedOnly)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(!hasRows)
+            if !model.leftovers.isEmpty {
+                Button {
+                    model.pendingRemoval = model.leftovers
+                } label: {
+                    Label("Remove Leftovers…", systemImage: "trash")
+                }
+                .disabled(model.isChecking || model.isRemoving)
+                .help("Remove the permissions of apps that are no longer installed")
+            }
+            Button {
+                model.refresh()
+            } label: {
+                Label("Check Again", systemImage: "arrow.clockwise")
+            }
+            .disabled(model.isChecking || model.isRemoving)
+        }
     }
 }
 
@@ -256,22 +256,36 @@ extension PrivacyDecision {
 }
 
 extension PrivacyPermission {
+    var color: Color {
+        switch self {
+        case .camera, .microphone: .green
+        case .screenRecording: .red
+        case .accessibility, .inputMonitoring: .blue
+        case .fullDiskAccess, .appManagement: .gray
+        case .automation, .developerTools: .indigo
+        case .filesAndFolders: .cyan
+        case .contacts: .brown
+        case .calendar, .reminders: .orange
+        case .photos: .pink
+        }
+    }
+
     var symbol: String {
         switch self {
-        case .camera: "camera"
-        case .microphone: "mic"
+        case .camera: "camera.fill"
+        case .microphone: "mic.fill"
         case .screenRecording: "rectangle.dashed.badge.record"
         case .accessibility: "accessibility"
-        case .inputMonitoring: "keyboard"
-        case .fullDiskAccess: "internaldrive"
-        case .automation: "gearshape.2"
-        case .filesAndFolders: "folder"
-        case .contacts: "person.crop.circle"
+        case .inputMonitoring: "keyboard.fill"
+        case .fullDiskAccess: "internaldrive.fill"
+        case .automation: "gearshape.2.fill"
+        case .filesAndFolders: "folder.fill"
+        case .contacts: "person.crop.circle.fill"
         case .calendar: "calendar"
         case .reminders: "list.bullet"
-        case .photos: "photo"
-        case .appManagement: "square.grid.2x2"
-        case .developerTools: "hammer"
+        case .photos: "photo.fill"
+        case .appManagement: "square.grid.2x2.fill"
+        case .developerTools: "hammer.fill"
         }
     }
 }

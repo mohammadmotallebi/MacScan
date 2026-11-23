@@ -28,35 +28,34 @@ struct HistoryView: View {
             .frame(minWidth: 260, idealWidth: 300, maxWidth: 400, maxHeight: .infinity)
             .overlay {
                 if state.history.isEmpty {
-                    ContentUnavailableView("No scans yet", systemImage: "clock", description: Text("Completed scans appear here."))
+                    SectionEmptyState(symbol: "clock.fill", color: .gray, title: "No scans yet", message: "Finished scans show up here.")
                 }
             }
 
             Group {
                 if let session = selected {
                     VStack(spacing: 0) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(session.startedAt.formatted(date: .complete, time: .shortened)).font(.headline)
-                                Text(session.title)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
+                        SectionHeader(
+                            title: session.title,
+                            subtitle: session.startedAt.formatted(date: .complete, time: .shortened),
+                            symbol: session.worstSeverity.symbol, color: session.worstSeverity.color
+                        ) {
+                            Menu {
+                                Button("Export as JSON…") { state.export([session], format: .json) }
+                                Button("Export as CSV…") { state.export([session], format: .csv) }
+                            } label: {
+                                Label("Export", systemImage: "square.and.arrow.up")
                             }
-                            Spacer()
-                            Button("Export JSON…") { state.export([session], format: .json) }
-                            Button("Export CSV…") { state.export([session], format: .csv) }
+                            .fixedSize()
                         }
-                        .padding(12)
                         Divider()
-                        SessionSummaryBar(session: session)
+                        SessionSummaryBar(session: session, showsHome: false)
                         Divider()
                         ResultsView(session: session)
                             .id(session.id)
                     }
                 } else {
-                    ContentUnavailableView("Select a scan", systemImage: "list.bullet.rectangle", description: Text("Choose a past scan to see its results."))
+                    SectionEmptyState(symbol: "list.bullet.rectangle.fill", color: .gray, title: "Select a scan", message: "Choose a past scan to see its results.")
                 }
             }
             .frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
@@ -102,9 +101,8 @@ struct HistoryRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: session.worstSeverity.symbol)
-                .foregroundStyle(session.worstSeverity.color)
-                .font(.title3)
+            IconTile(symbol: session.fullCheck != nil ? "checkmark.shield.fill" : session.worstSeverity.symbol,
+                     color: session.worstSeverity.color, size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(session.startedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.callout.weight(.medium))

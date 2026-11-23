@@ -138,20 +138,24 @@ struct EngineStatusRow: View {
 struct SessionSummaryBar: View {
     @Environment(AppState.self) private var state
     let session: ScanSession
+    /// History shows the scan's title in its own header, and has nowhere to go "home" to.
+    var showsHome = true
     @State private var showNotes = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Button {
-                state.currentSession = nil
-            } label: {
-                Label("Home", systemImage: "chevron.left")
+            if showsHome {
+                Button {
+                    state.currentSession = nil
+                } label: {
+                    Label("Home", systemImage: "chevron.left")
+                }
+                .buttonStyle(.glass)
+                .help("Back to the home screen")
             }
-            .buttonStyle(.glass)
-            .help("Back to the home screen")
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.title).font(.headline).lineLimit(1)
-                Text("\(session.itemsScanned.formatted()) of \(session.itemsTotal.formatted()) items · \(session.startedAt.formatted(date: .abbreviated, time: .shortened))")
+                if showsHome { Text(session.title).font(.headline).lineLimit(1) }
+                Text("\(session.itemsScanned.formatted()) of \(session.itemsTotal.formatted()) items\(showsHome ? " · " + session.startedAt.formatted(date: .abbreviated, time: .shortened) : "")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()

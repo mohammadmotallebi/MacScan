@@ -8,31 +8,15 @@ struct SecurityView: View {
     var body: some View {
         let model = state.security
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                if model.checks.isEmpty {
-                    Text(model.isChecking ? "Checking…" : "Not checked yet").foregroundStyle(.secondary)
-                } else {
-                    summary(model)
-                }
-                Spacer()
-                if model.isChecking { ProgressView().controlSize(.small) }
-                if let date = model.lastChecked {
-                    Text("Checked \(date.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Button("Check Again") { model.refresh() }
-                    .disabled(model.isChecking)
-            }
-            .padding(12)
+            header(model)
             Divider()
 
             if model.checks.isEmpty {
-                ContentUnavailableView {
-                    Label("Security settings", systemImage: "lock.shield")
-                } description: {
-                    Text("Checks whether the protections built into macOS are on, and looks for settings that adware changes.\nMacScan only reads them; it never changes a setting.")
-                }
+                SectionEmptyState(
+                    symbol: "lock.shield.fill", color: .indigo,
+                    title: model.isChecking ? "Checking your settings…" : "Security settings",
+                    message: "Checks whether the protections built into macOS are on, and looks for settings that adware changes. MacScan only reads them; it never changes a setting.",
+                    isBusy: model.isChecking, buttonTitle: "Check Security", action: { model.refresh() })
             } else {
                 List {
                     ForEach(PostureGroup.allCases) { group in
@@ -44,7 +28,7 @@ struct SecurityView: View {
                                 }
                             } header: {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                    Text(group.title).font(.headline).foregroundStyle(.primary)
+                                    Text(group.title).font(.title3.weight(.semibold)).foregroundStyle(.primary)
                                     Text(group.explanation).font(.callout).foregroundStyle(.secondary)
                                 }
                                 .padding(.vertical, 2)
@@ -54,12 +38,7 @@ struct SecurityView: View {
                 }
                 .listStyle(.inset)
                 Divider()
-                Text("MacScan only reads these settings. Change them yourself in System Settings.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                SectionFootnote(text: "MacScan only reads these settings. Change them yourself in System Settings.")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -69,17 +48,32 @@ struct SecurityView: View {
         }
     }
 
-    @ViewBuilder
-    private func summary(_ model: SecurityModel) -> some View {
-        let attention = model.count(.fail) + model.count(.warning)
-        Label(attention == 0 ? "Everything checked is on" : "\(attention) \(attention == 1 ? "setting needs" : "settings need") attention",
-              systemImage: attention == 0 ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
-            .font(.headline)
-            .foregroundStyle(model.count(.fail) > 0 ? .red : attention > 0 ? .orange : .green)
-        if model.count(.unknown) > 0 {
-            Text("\(model.count(.unknown)) couldn't be read")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+    private func header(_ model: SecurityModel) -> some View {
+        let fails = model.count(.fail), warnings = model.count(.warning), unknown = model.count(.unknown)
+        let attention = fails + warnings
+        let color: Color = model.checks.isEmpty ? .indigo : fails > 0 ? .red : attention > 0 ? .orange : .green
+        var subtitle = model.checks.isEmpty
+            ? (model.isChecking ? "Checking…" : "Not checked yet")
+            : attention == 0 ? "Everything checked is on." : "\(attention) \(attention == 1 ? "setting needs" : "settings need") a look."
+        if let date = model.lastChecked { subtitle += " Checked \(date.formatted(date: .omitted, time: .shortened))." }
+        var chips: [CountChip] = []
+        if !model.checks.isEmpty {
+            chips.append(CountChip(symbol: "checkmark.circle.fill", text: "\(model.count(.pass)) pass", color: .green))
+            if warnings > 0 { chips.append(CountChip(symbol: "exclamationmark.triangle.fill", text: "\(warnings) warning\(warnings == 1 ? "" : "s")", color: .orange)) }
+            if fails > 0 { chips.append(CountChip(symbol: "xmark.octagon.fill", text: "\(fails) off", color: .red)) }
+            if unknown > 0 { chips.append(CountChip(symbol: "questionmark.circle", text: "\(unknown) unread", color: .secondary, dimmed: true)) }
+        }
+        return SectionHeader(title: "Security", subtitle: subtitle, symbol: "lock.shield.fill", color: color, chips: chips, isBusy: model.isChecking) {
+            if !model.checks.isEmpty {
+                DonutRing(good: model.count(.pass), total: model.checks.count, color: color, size: 58)
+            }
+        } actions: {
+            Button {
+                model.refresh()
+            } label: {
+                Label("Check Again", systemImage: "arrow.clockwise")
+            }
+            .disabled(model.isChecking)
         }
     }
 }
@@ -90,10 +84,7 @@ private struct PostureRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: check.status.symbol)
-                .foregroundStyle(check.status.color)
-                .font(.title3)
-                .frame(width: 22)
+            IconTile(symbol: check.status.symbol, color: check.status == .unknown ? .gray : check.status.color, size: 26)
             VStack(alignment: .leading, spacing: 3) {
                 Text(check.title).font(.body.weight(.medium))
                 Text(check.summary)
@@ -110,6 +101,7 @@ private struct PostureRow: View {
             Spacer(minLength: 12)
             if check.settingsURL != nil, check.status != .pass {
                 Button("Open Settings", action: openSettings)
+                    .buttonStyle(.glass)
                     .controlSize(.small)
             }
         }

@@ -9,37 +9,17 @@ struct NetworkView: View {
     var body: some View {
         @Bindable var model = state.network
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                if let snapshot = model.snapshot, snapshot.problem == nil {
-                    summary(snapshot)
-                } else {
-                    Text(model.isChecking ? "Checking…" : model.snapshot == nil ? "Not checked yet" : "Couldn't check").foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.isChecking { ProgressView().controlSize(.small) }
-                if let date = model.snapshot?.takenAt {
-                    Text("Taken \(date.formatted(date: .omitted, time: .standard))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Toggle("Flagged only", isOn: $model.flaggedOnly).toggleStyle(.checkbox)
-                Toggle("Hide macOS", isOn: $model.hideApple)
-                    .toggleStyle(.checkbox)
-                    .help("Hide macOS's own programs (they are still shown if something about them is worth a look)")
-                Button("Check Again") { model.refresh() }
-                    .disabled(model.isChecking)
-            }
-            .padding(12)
+            header(model)
             Divider()
 
             if let snapshot = model.snapshot {
                 content(snapshot, model: model)
             } else {
-                ContentUnavailableView {
-                    Label("Network", systemImage: "network")
-                } description: {
-                    Text("Shows which programs are talking to other computers right now, and which accept connections.\nMacScan only looks; it never blocks anything.")
-                }
+                SectionEmptyState(
+                    symbol: "network", color: .green,
+                    title: model.isChecking ? "Looking at connections…" : "Network",
+                    message: "Shows which programs are talking to other computers right now, and which accept connections. MacScan only looks; it never blocks anything.",
+                    isBusy: model.isChecking, buttonTitle: "Check Network", action: { model.refresh() })
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -52,12 +32,14 @@ struct NetworkView: View {
     @ViewBuilder
     private func content(_ snapshot: NetworkSnapshot, model: NetworkModel) -> some View {
         if let problem = snapshot.problem {
-            ContentUnavailableView("Couldn't check the network", systemImage: "exclamationmark.triangle", description: Text(problem))
+            SectionEmptyState(symbol: "exclamationmark.triangle.fill", color: .orange, title: "Couldn't check the network", message: problem,
+                              buttonTitle: "Try Again", action: { model.refresh() })
         } else {
             let shown = model.shown(snapshot)
             if shown.isEmpty {
-                ContentUnavailableView(snapshot.apps.isEmpty ? "No network activity" : "Nothing flagged", systemImage: "checkmark.circle",
-                                       description: Text(snapshot.apps.isEmpty ? "No program has a connection open." : "No program looks out of place."))
+                SectionEmptyState(symbol: "checkmark.circle.fill", color: .green,
+                                  title: snapshot.apps.isEmpty ? "No network activity" : "Nothing flagged",
+                                  message: snapshot.apps.isEmpty ? "No program has a connection open." : "No program looks out of place.")
             } else {
                 List(shown) { app in
                     NetworkRow(app: app, model: model)
@@ -65,29 +47,45 @@ struct NetworkView: View {
                 .listStyle(.inset)
             }
             Divider()
-            Text("A snapshot of this moment. Addresses are shown as numbers: MacScan doesn't look names up, so it never goes online."
-                 + (snapshot.onlyOwnPrograms ? " Only your own programs are shown; services running as other users are not." : ""))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+            SectionFootnote(text: "A snapshot of this moment. Addresses are shown as numbers: MacScan doesn't look names up, so it never goes online."
+                            + (snapshot.onlyOwnPrograms ? " Only your own programs are shown; services running as other users are not." : ""))
         }
     }
 
-    @ViewBuilder
-    private func summary(_ snapshot: NetworkSnapshot) -> some View {
-        let warnings = snapshot.count(.warning)
-        let review = snapshot.count(.review)
-        Label(warnings > 0 ? "\(warnings) \(warnings == 1 ? "program needs" : "programs need") attention"
-              : review > 0 ? "\(review) worth a look" : "Nothing looks out of place",
-              systemImage: warnings > 0 ? "exclamationmark.triangle.fill" : review > 0 ? "eye.fill" : "checkmark.circle.fill")
-            .font(.headline)
-            .foregroundStyle(warnings > 0 ? .orange : review > 0 ? .blue : .green)
-        let out = snapshot.apps.filter { $0.widestScope == .internet }.count
-        Text("\(snapshot.apps.count) using the network · \(out) talking to the internet")
-            .font(.callout)
-            .foregroundStyle(.secondary)
+    private func header(_ model: NetworkModel) -> some View {
+        @Bindable var model = model
+        let snapshot = model.snapshot.flatMap { $0.problem == nil ? $0 : nil }
+        let warnings = snapshot?.count(.warning) ?? 0
+        let review = snapshot?.count(.review) ?? 0
+        let out = snapshot?.apps.filter { $0.widestScope == .internet }.count ?? 0
+        let color: Color = snapshot == nil ? .green : warnings > 0 ? .orange : review > 0 ? .blue : .green
+        var subtitle = snapshot == nil
+            ? (model.isChecking ? "Checking…" : model.snapshot == nil ? "Not checked yet" : "Couldn't check")
+            : warnings > 0 ? "\(warnings) \(warnings == 1 ? "program needs" : "programs need") a look."
+            : review > 0 ? "\(review) worth a look." : "Nothing looks out of place."
+        if let date = model.snapshot?.takenAt { subtitle += " Taken \(date.formatted(date: .omitted, time: .standard))." }
+        var chips: [CountChip] = []
+        if let snapshot {
+            chips.append(CountChip(symbol: "app.connected.to.app.below.fill", text: "\(snapshot.apps.count) programs", color: .green))
+            chips.append(CountChip(symbol: "globe", text: "\(out) on the internet", color: .blue))
+            if warnings > 0 { chips.append(CountChip(symbol: "exclamationmark.triangle.fill", text: "\(warnings) warning\(warnings == 1 ? "" : "s")", color: .orange)) }
+            if review > 0 { chips.append(CountChip(symbol: "eye.fill", text: "\(review) to review", color: .blue)) }
+        }
+        return SectionHeader(title: "Network", subtitle: subtitle, symbol: "network", color: color, chips: chips, isBusy: model.isChecking) {
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Flagged only", isOn: $model.flaggedOnly)
+                Toggle("Hide macOS", isOn: $model.hideApple)
+                    .help("Hide macOS's own programs (they are still shown if something about them is worth a look)")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            Button {
+                model.refresh()
+            } label: {
+                Label("Check Again", systemImage: "arrow.clockwise")
+            }
+            .disabled(model.isChecking)
+        }
     }
 }
 

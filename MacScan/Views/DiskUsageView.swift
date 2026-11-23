@@ -16,14 +16,10 @@ struct DiskUsageView: View {
                 } else if let report = model.report {
                     DiskUsageReportView(report: report)
                 } else {
-                    ContentUnavailableView {
-                        Label("Find what takes up space", systemImage: "chart.bar.doc.horizontal")
-                    } description: {
-                        Text("MacScan measures every folder in the location you choose and lists the biggest folders and files. Nothing is changed until you choose to move something to the Trash.")
-                    } actions: {
-                        Button("Measure \(model.locationName)") { model.scan() }
-                            .buttonStyle(.borderedProminent)
-                    }
+                    SectionEmptyState(
+                        symbol: "chart.pie.fill", color: .orange, title: "Find what takes up space",
+                        message: "MacScan measures every folder in the location you choose and lists the biggest folders and files. Nothing is changed until you choose to move something to the Trash.",
+                        buttonTitle: "Measure \(model.locationName)", action: { model.scan() })
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -82,7 +78,23 @@ struct DiskUsageToolbar: View {
 
     var body: some View {
         let model = state.diskUsage
-        HStack(spacing: 10) {
+        let report = model.isScanning ? nil : model.report
+        let safe = model.suggestions.filter { $0.priority == .safe }.reduce(Int64(0)) { $0 + $1.item.size }
+        var chips: [CountChip] = []
+        if let report {
+            chips.append(CountChip(symbol: "internaldrive.fill", text: report.totalSize.formatted(.byteCount(style: .file)), color: .orange))
+            chips.append(CountChip(symbol: "doc.fill", text: "\(report.fileCount.formatted()) files", color: .gray))
+            if safe > 0 { chips.append(CountChip(symbol: "sparkles", text: "\(safe.formatted(.byteCount(style: .file))) safe to clean", color: .green)) }
+        }
+        if let free = Self.freeSpace() {
+            chips.append(CountChip(symbol: "externaldrive.fill", text: "\(free.formatted(.byteCount(style: .file))) free on disk", color: .blue))
+        }
+        return SectionHeader(
+            title: "Disk Usage",
+            subtitle: model.isScanning ? "Measuring \(model.locationName)…"
+                : report == nil ? "See which folders and files take the most space." : "Biggest folders and files in \(model.locationName).",
+            symbol: "chart.pie.fill", color: .orange, chips: chips, isBusy: model.isScanning
+        ) {
             Menu {
                 Button("Home Folder") { model.scan(AppPaths.home) }
                 Button("Macintosh HD (whole disk)") { model.scan(URL(fileURLWithPath: "/")) }
@@ -96,19 +108,26 @@ struct DiskUsageToolbar: View {
             .help("Choose what to measure")
 
             if model.isScanning {
-                Button("Cancel") { model.cancel() }
+                Button {
+                    model.cancel()
+                } label: {
+                    Label("Cancel", systemImage: "xmark")
+                }
             } else {
-                Button(model.report == nil ? "Measure" : "Measure Again") { model.scan() }
-                    .keyboardShortcut("r", modifiers: [.command, .option])
-            }
-            Spacer()
-            if let report = model.report, !model.isScanning {
-                Text("\(report.totalSize.formatted(.byteCount(style: .file))) in \(report.fileCount.formatted()) files")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                Button {
+                    model.scan()
+                } label: {
+                    Label(model.report == nil ? "Measure" : "Measure Again", systemImage: "arrow.clockwise")
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
             }
         }
-        .padding(10)
+    }
+
+    /// Free space on the startup disk.
+    static func freeSpace() -> Int64? {
+        let values = try? URL(fileURLWithPath: "/").resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage
     }
 }
 
@@ -117,19 +136,22 @@ struct DiskUsageProgressView: View {
     let location: String
 
     var body: some View {
-        VStack(spacing: 10) {
-            ProgressView()
-            Text("Measuring \(location)…").font(.headline)
+        VStack(spacing: 16) {
+            SectionEmptyState(
+                symbol: "chart.pie.fill", color: .orange, title: "Measuring \(location)…",
+                message: progress.map { "\($0.filesScanned.formatted()) files · \($0.bytesCounted.formatted(.byteCount(style: .file)))" } ?? "Starting…",
+                isBusy: true)
+                .frame(maxHeight: 340)
             if let progress {
-                Text("\(progress.filesScanned.formatted()) files · \(progress.bytesCounted.formatted(.byteCount(style: .file)))")
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
                 Text(progress.currentFolder)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: 500)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .glassCard(radius: 12)
             }
         }
         .padding()
@@ -171,8 +193,9 @@ struct DiskUsageReportView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .controlSize(.large)
             .fixedSize()
-            .padding(8)
+            .padding(10)
 
             switch model.tab {
             case .cleanup: CleanupList()
@@ -309,7 +332,7 @@ struct SizeBar: View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
-                Capsule().fill(Color.accentColor.opacity(0.8))
+                Capsule().fill(LinearGradient(colors: [.orange.opacity(0.7), .orange], startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(2, geo.size.width * min(1, max(0, fraction))))
             }
         }
@@ -323,48 +346,75 @@ struct CleanupList: View {
     var body: some View {
         let model = state.diskUsage
         VStack(spacing: 0) {
-            HStack(spacing: 16) {
-                Label("\(model.size(of: .safe).formatted(.byteCount(style: .file))) safe to clean", systemImage: "checkmark.seal.fill")
-                    .foregroundStyle(.green)
-                Label("\(model.size(of: .review).formatted(.byteCount(style: .file))) to review", systemImage: "eye.fill")
-                    .foregroundStyle(.orange)
+            HStack(spacing: 12) {
+                CleanupTotalCard(title: "Safe to clean", size: model.size(of: .safe), symbol: "checkmark.seal.fill", color: .green)
+                CleanupTotalCard(title: "Review first", size: model.size(of: .review), symbol: "eye.fill", color: .orange)
                 Spacer()
                 if model.isCleaning { ProgressView().controlSize(.small); Text("Moving to Trash…").foregroundStyle(.secondary) }
                 Button {
                     model.openCleanup()
                 } label: {
                     Label("Clean Up…", systemImage: "sparkles")
+                        .padding(.horizontal, 6)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
                 .disabled(model.isCleaning || model.cleanableSuggestions.isEmpty)
                 .help("Choose what to move to the Trash. \"Safe to clean\" items are ticked for you.")
             }
-            .font(.callout.weight(.medium))
             .padding(.horizontal, 12)
-            .padding(.bottom, 6)
+            .padding(.bottom, 10)
             Divider()
             List {
                 ForEach(CleanupPriority.allCases, id: \.self) { priority in
                     let entries = model.entries.filter { $0.priority == priority }
                     if !entries.isEmpty {
-                        Section(priority == .safe ? "Safe to clean: rebuilt or re-downloaded automatically" : "Review first: check before deleting") {
+                        Section {
                             ForEach(entries) { entry in
                                 switch entry {
                                 case .single(let s): CleanupSuggestionRow(suggestion: s)
                                 case .group(let title, let members): CleanupGroupRow(title: title, members: members)
                                 }
                             }
+                        } header: {
+                            Label {
+                                Text(priority == .safe ? "Safe to clean" : "Review first").font(.title3.weight(.semibold)).foregroundStyle(.primary)
+                                + Text(priority == .safe ? "  Rebuilt or downloaded again on its own" : "  Check before deleting").font(.callout).foregroundStyle(.secondary)
+                            } icon: {
+                                IconTile(symbol: priority == .safe ? "checkmark.seal.fill" : "eye.fill", color: priority == .safe ? .green : .orange, size: 22)
+                            }
+                            .padding(.vertical, 2)
                         }
                     }
                 }
             }
             .overlay {
                 if model.suggestions.isEmpty {
-                    ContentUnavailableView("Nothing obvious to clean", systemImage: "sparkles",
-                                           description: Text("No large caches, build leftovers or old downloads were found here. Check Largest Files and Largest Folders for anything you no longer need."))
+                    SectionEmptyState(symbol: "sparkles", color: .green, title: "Nothing obvious to clean",
+                                      message: "No large caches, build leftovers or old downloads were found here. Check Largest Files and Largest Folders for anything you no longer need.")
                 }
             }
         }
+    }
+}
+
+struct CleanupTotalCard: View {
+    let title: String
+    let size: Int64
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            IconTile(symbol: symbol, color: color, size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Text(size.formatted(.byteCount(style: .file))).font(.title3.weight(.semibold)).monospacedDigit()
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .glassCard(tint: color, radius: 14)
     }
 }
 

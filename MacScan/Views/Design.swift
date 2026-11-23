@@ -141,6 +141,126 @@ struct CountChip: View {
     }
 }
 
+/// The top of a section: a big colored icon, the title, one line of summary, count chips and buttons.
+struct SectionHeader<Accessory: View, Actions: View>: View {
+    let title: String
+    let subtitle: String
+    let symbol: String
+    let color: Color
+    var chips: [CountChip] = []
+    var isBusy = false
+    @ViewBuilder var accessory: Accessory
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 16) {
+            IconTile(symbol: symbol, color: color, size: 52)
+                .symbolEffect(.pulse, options: .repeating, isActive: isBusy)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title)
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if !chips.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(chips.enumerated()), id: \.offset) { $0.element }
+                    }
+                    .padding(.top, 2)
+                }
+            }
+            Spacer(minLength: 12)
+            accessory
+            HStack(spacing: 8) {
+                if isBusy { ProgressView().controlSize(.small) }
+                actions
+            }
+            .buttonStyle(.glass)
+        }
+        .padding(18)
+        .glassCard(tint: color, radius: 22)
+        .padding(12)
+        .background(SectionWash(color: color))
+    }
+}
+
+extension SectionHeader where Accessory == EmptyView {
+    init(title: String, subtitle: String, symbol: String, color: Color, chips: [CountChip] = [], isBusy: Bool = false,
+         @ViewBuilder actions: () -> Actions) {
+        self.init(title: title, subtitle: subtitle, symbol: symbol, color: color, chips: chips, isBusy: isBusy,
+                  accessory: { EmptyView() }, actions: actions)
+    }
+}
+
+/// A soft color wash behind a section header.
+struct SectionWash: View {
+    let color: Color
+
+    var body: some View {
+        LinearGradient(colors: [color.opacity(0.16), color.opacity(0.03)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
+/// A big friendly empty or loading state with one main button.
+struct SectionEmptyState: View {
+    let symbol: String
+    let color: Color
+    let title: String
+    let message: String
+    var isBusy = false
+    var buttonTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ZStack {
+                Circle().fill(color.opacity(0.12).gradient)
+                Circle().strokeBorder(color.opacity(0.25), lineWidth: 2)
+                Image(systemName: symbol)
+                    .font(.system(size: 44, weight: .semibold))
+                    .foregroundStyle(color.gradient)
+                    .symbolEffect(.pulse, options: .repeating, isActive: isBusy)
+            }
+            .frame(width: 110, height: 110)
+            .shadow(color: color.opacity(0.2), radius: 12)
+            Text(title)
+                .font(.title2.weight(.bold))
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 440)
+            if isBusy {
+                ProgressView().controlSize(.small)
+            } else if let buttonTitle, let action {
+                Button(action: action) {
+                    Text(buttonTitle).padding(.horizontal, 8)
+                }
+                .buttonStyle(.glassProminent)
+                .controlSize(.large)
+            }
+        }
+        .padding(30)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(RadialGradient(colors: [color.opacity(0.10), .clear], center: .center, startRadius: 20, endRadius: 420))
+    }
+}
+
+/// A plain note line at the bottom of a section.
+struct SectionFootnote: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "info.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+    }
+}
+
 extension MenuBarStatus.Level {
     var color: Color {
         switch self {

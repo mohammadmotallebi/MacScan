@@ -10,37 +10,50 @@ struct QuarantineView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(state.quarantined.isEmpty ? "Nothing in quarantine" : "\(state.quarantined.count) \(state.quarantined.count == 1 ? "item" : "items") in quarantine")
-                    .font(.headline)
-                Spacer()
-                Button("Restore") { if let selected { state.restoreQuarantined(selected) } }
-                    .disabled(selected == nil)
-                    .help("Put the selected item back exactly where it was")
-                Button("Delete Permanently…", role: .destructive) {
-                    if let selected { state.pendingQuarantineDelete = PendingQuarantineDelete(items: [selected]) }
+            let total = state.quarantined.compactMap(\.size).reduce(0, +)
+            SectionHeader(
+                title: "Quarantine",
+                subtitle: state.quarantined.isEmpty ? "Nothing locked away." : "Locked items can't run or be opened. Select one to restore or delete it.",
+                symbol: "archivebox.fill", color: .purple,
+                chips: state.quarantined.isEmpty ? [] : [
+                    CountChip(symbol: "lock.fill", text: "\(state.quarantined.count) \(state.quarantined.count == 1 ? "item" : "items")", color: .purple),
+                    CountChip(symbol: "internaldrive.fill", text: ByteCountFormatter.string(fromByteCount: total, countStyle: .file), color: .gray),
+                ]
+            ) {
+                Button {
+                    if let selected { state.restoreQuarantined(selected) }
+                } label: {
+                    Label("Restore", systemImage: "arrow.uturn.backward")
                 }
                 .disabled(selected == nil)
+                .help("Put the selected item back exactly where it was")
+                Button(role: .destructive) {
+                    if let selected { state.pendingQuarantineDelete = PendingQuarantineDelete(items: [selected]) }
+                } label: {
+                    Label("Delete…", systemImage: "trash")
+                }
+                .disabled(selected == nil)
+                .help("Delete the selected item for good")
                 Button("Delete All…", role: .destructive) {
                     state.pendingQuarantineDelete = PendingQuarantineDelete(items: state.quarantined)
                 }
                 .disabled(state.quarantined.isEmpty)
             }
-            .padding(12)
             Divider()
 
             if state.quarantined.isEmpty {
-                ContentUnavailableView {
-                    Label("Quarantine is empty", systemImage: "archivebox")
-                } description: {
-                    Text("Choose Quarantine… on a scan result to move it here. Quarantined items are locked so they can't run or be opened, and can be put back exactly where they were.")
-                }
+                SectionEmptyState(
+                    symbol: "archivebox.fill", color: .purple, title: "Quarantine is empty",
+                    message: "Choose Quarantine… on a scan result to move it here. Quarantined items are locked so they can't run or be opened, and can be put back exactly where they were.")
             } else {
                 Table(state.quarantined, selection: $selection) {
                     TableColumn("Item") { item in
                         VStack(alignment: .leading, spacing: 1) {
-                            Label(item.name, systemImage: item.isDirectory ? "folder" : "doc")
-                                .lineLimit(1)
+                            Label {
+                                Text(item.name).lineLimit(1)
+                            } icon: {
+                                IconTile(symbol: item.isDirectory ? "folder.fill" : "doc.fill", color: .purple, size: 18)
+                            }
                             Text((item.originalPath as NSString).deletingLastPathComponent)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
@@ -89,12 +102,7 @@ struct QuarantineView: View {
                     }
                 }
                 Divider()
-                Text("Quarantined items are locked and can't run. Restore puts an item back where it was; Delete Permanently can't be undone.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                SectionFootnote(text: "Restore puts an item back where it was. Delete can't be undone.")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
