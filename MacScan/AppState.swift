@@ -12,6 +12,7 @@ enum AppSection: Hashable {
     case security
     case privacy
     case network
+    case battery
     case quarantine
 }
 
@@ -113,6 +114,7 @@ final class AppState {
     let security = SecurityModel()
     let privacy = PrivacyModel()
     let network = NetworkModel()
+    let battery = BatteryModel()
 
     // MARK: UI state
 

@@ -93,7 +93,8 @@ For Desktop, Documents and Downloads, macOS may instead show a one-time consent 
    download takes a few minutes).
 2. Click **Run Full Check**, pick one area under **Scan one area**, or drop any file or folder onto
    the window. The home screen shows how the last Full Check went, plus Security, Privacy, Network,
-   Quarantine and Engines cards.
+   Quarantine and Engines cards. **Over time** charts the threats, warnings and security score of
+   your last 15 Full Checks; hover a bar for details, click it to open that check.
 3. Review the results. Select a row for details. Right-click for Reveal in Finder, VirusTotal lookup,
    Ignore, or Move to Trash. Click **Home** to go back.
 
@@ -338,6 +339,21 @@ marked; they are mostly local discovery such as Bonjour.
 
 MacScan never blocks or closes anything, and it doesn't look up host names, so the check never goes online.
 Without administrator rights only your own programs are visible.
+
+
+### Battery
+
+**Battery** in the sidebar (⇧⌘B) shows which apps and services use energy. MacScan only looks; it never
+quits or slows anything.
+
+- **Using energy now**: Activity Monitor's energy number, measured over 2 seconds. An app's helpers count
+  toward the app (Code Helper toward VS Code). Each row is tagged High, Medium or Low, and busy macOS
+  services get a short note, e.g. "Spotlight indexing your files".
+- **Most energy since opened**: watt-hours each of your own apps used since it started (Apple silicon).
+  macOS doesn't share this for its own services or other users' programs.
+- **Keeping your Mac awake**: what stops the Mac or its screen from sleeping (from `pmset -g assertions`).
+  Audio held by macOS for an app is shown under that app.
+- The header shows charge and whether the Mac is on battery. The home screen has a Battery card.
 
 ### Quarantine
 

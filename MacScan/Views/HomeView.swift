@@ -1,3 +1,4 @@
+import Charts
 import MacScanCore
 import SwiftUI
 
@@ -14,6 +15,7 @@ struct HomeView: View {
                 HomeHero(status: state.menuBarStatus)
                 ScanActionGrid()
                 StatusCards()
+                TrendCard()
                 FoldersCard()
                 Text("Tip: drop any file or folder onto this window to scan it.")
                     .font(.caption)
@@ -188,6 +190,7 @@ struct StatusCards: View {
                 securityCard
                 privacyCard
                 networkCard
+                batteryCard
                 StatusCard(title: "Quarantine", symbol: "archivebox.fill", color: .indigo,
                            value: state.quarantined.isEmpty ? "Empty" : "\(state.quarantined.count) item\(state.quarantined.count == 1 ? "" : "s")",
                            line: state.quarantined.isEmpty ? "Nothing locked away" : "Locked away safely") {
@@ -254,6 +257,18 @@ struct StatusCards: View {
                           lineColor: (summary?.warnings ?? 0) > 0 ? .orange : nil) {
             state.selectedSection = .network
             if snapshot == nil { state.network.refresh() }
+        }
+    }
+
+    private var batteryCard: some View {
+        let report = state.battery.report.flatMap { $0.problem == nil ? $0 : nil }
+        let heavy = report?.usingNow.filter { $0.level == .high } ?? []
+        let value = report.map { r in r.state.percent.map { "\($0)%" } ?? "\(r.usingNow.count) using" } ?? "Not checked"
+        let line = report == nil ? "Open to check" : heavy.isEmpty ? "No heavy apps" : "\(heavy.first!.name)\(heavy.count > 1 ? " +\(heavy.count - 1)" : "") using a lot"
+        return StatusCard(title: "Battery", symbol: "battery.75percent", color: .yellow,
+                          value: value, line: line, lineColor: heavy.isEmpty ? nil : .orange) {
+            state.selectedSection = .battery
+            state.battery.refresh()
         }
     }
 
@@ -430,5 +445,144 @@ struct FullDiskAccessBanner: View {
         }
         .padding(14)
         .glassCard(tint: .orange, radius: 16)
+    }
+}
+
+// MARK: - Trend
+
+/// Threats and warnings found by recent Full Checks, plus the security settings score.
+struct TrendCard: View {
+    @Environment(AppState.self) private var state
+    @State private var hovered: String?
+
+    var body: some View {
+        let points = FullCheckTrend.points(from: state.history)
+        VStack(alignment: .leading, spacing: 12) {
+            SectionTitle("Over time", trailing: points.count >= 2 ? AnyView(change(points)) : nil)
+            Group {
+                if points.count < 2 {
+                    Label("Run a couple of Full Checks to see how things change over time.", systemImage: "chart.bar.xaxis")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    VStack(alignment: .leading, spacing: 14) {
+                        problemsChart(points)
+                        if points.contains(where: { $0.securityPassed != nil }) {
+                            securityChart(points)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .glassCard(radius: 18)
+        }
+    }
+
+    private func key(_ index: Int) -> String { "\(index)" }
+
+    private func point(for key: String?, in points: [FullCheckPoint]) -> FullCheckPoint? {
+        guard let key, let index = Int(key), points.indices.contains(index) else { return nil }
+        return points[index]
+    }
+
+    private func problemsChart(_ points: [FullCheckPoint]) -> some View {
+        let selected = point(for: hovered, in: points)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                Text("Problems found").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+                Spacer()
+                legend("Threats", .red)
+                legend("Warnings", .orange)
+            }
+            Chart {
+                ForEach(Array(points.enumerated()), id: \.offset) { index, p in
+                    BarMark(x: .value("Run", key(index)), y: .value("Count", p.threats))
+                        .foregroundStyle(by: .value("Kind", "Threats"))
+                        .opacity(hovered == nil || hovered == key(index) ? 1 : 0.45)
+                    BarMark(x: .value("Run", key(index)), y: .value("Count", p.warnings))
+                        .foregroundStyle(by: .value("Kind", "Warnings"))
+                        .opacity(hovered == nil || hovered == key(index) ? 1 : 0.45)
+                }
+                if let hovered, let selected {
+                    RuleMark(x: .value("Run", hovered))
+                        .foregroundStyle(.secondary.opacity(0.25))
+                        .annotation(position: .top, overflowResolution: .init(x: .fit, y: .disabled)) {
+                            tip(selected)
+                        }
+                }
+            }
+            .chartForegroundStyleScale(["Threats": Color.red.gradient, "Warnings": Color.orange.gradient])
+            .chartLegend(.hidden)
+            .chartXAxis {
+                AxisMarks { value in
+                    if let k = value.as(String.self), let p = point(for: k, in: points) {
+                        AxisValueLabel(p.date.formatted(.dateTime.month(.abbreviated).day()))
+                    }
+                }
+            }
+            .chartXSelection(value: $hovered)
+            .onTapGesture {
+                if let selected { state.showSession(selected.id) }
+            }
+            .frame(height: 150)
+            .help("Click a bar to open that Full Check.")
+        }
+    }
+
+    private func securityChart(_ points: [FullCheckPoint]) -> some View {
+        let total = points.compactMap(\.securityTotal).max() ?? 1
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("Security settings passed").font(.caption.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
+            Chart {
+                ForEach(Array(points.enumerated()), id: \.offset) { index, p in
+                    if let passed = p.securityPassed {
+                        LineMark(x: .value("Run", key(index)), y: .value("Passed", passed))
+                            .interpolationMethod(.monotone)
+                            .foregroundStyle(Color.blue.gradient)
+                        PointMark(x: .value("Run", key(index)), y: .value("Passed", passed))
+                            .foregroundStyle(passed == p.securityTotal ? Color.green : Color.orange)
+                            .symbolSize(hovered == key(index) ? 70 : 30)
+                    }
+                }
+            }
+            .chartYScale(domain: 0...total)
+            .chartYAxis { AxisMarks(values: [0, total]) }
+            .chartXAxis(.hidden)
+            .chartXSelection(value: $hovered)
+            .frame(height: 60)
+        }
+    }
+
+    private func legend(_ title: String, _ color: Color) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func tip(_ p: FullCheckPoint) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(p.date.formatted(date: .abbreviated, time: .shortened)).font(.caption.weight(.semibold))
+            Text("\(p.threats) threat\(p.threats == 1 ? "" : "s") · \(p.warnings) warning\(p.warnings == 1 ? "" : "s")")
+                .font(.caption)
+            if let passed = p.securityPassed, let total = p.securityTotal {
+                Text("Security \(passed) of \(total)").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(8)
+        .background(.regularMaterial, in: .rect(cornerRadius: 8))
+    }
+
+    /// "3 fewer problems than last time", comparing the last two Full Checks.
+    private func change(_ points: [FullCheckPoint]) -> some View {
+        let last = points[points.count - 1], before = points[points.count - 2]
+        let diff = (last.threats + last.warnings) - (before.threats + before.warnings)
+        let text = diff == 0 ? "Same as last time"
+            : "\(abs(diff)) \(diff < 0 ? "fewer" : "more") problem\(abs(diff) == 1 ? "" : "s") than last time"
+        let color: Color = diff < 0 ? .green : diff > 0 ? .orange : .secondary
+        return Label(text, systemImage: diff < 0 ? "arrow.down.right" : diff > 0 ? "arrow.up.right" : "equal")
+            .font(.callout)
+            .foregroundStyle(color)
     }
 }

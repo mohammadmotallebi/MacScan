@@ -21,6 +21,8 @@ struct ContentView: View {
                         .tag(AppSection.privacy)
                     SidebarRow(title: "Network", symbol: "network", color: .green)
                         .tag(AppSection.network)
+                    SidebarRow(title: "Battery", symbol: "battery.75percent", color: .yellow)
+                        .tag(AppSection.battery)
                 }
                 Section("Clean up") {
                     SidebarRow(title: "Uninstall", symbol: "trash.fill", color: .red)
@@ -54,6 +56,7 @@ struct ContentView: View {
                 case .security: SecurityView()
                 case .privacy: PrivacyView()
                 case .network: NetworkView()
+                case .battery: BatteryView()
                 case .quarantine: QuarantineView()
                 }
             }
@@ -73,7 +76,7 @@ struct ContentView: View {
                     return true
                 }
                 // These sections have nothing to drop onto.
-                if [.security, .privacy, .network, .quarantine].contains(state.selectedSection) { return false }
+                if [.security, .privacy, .network, .battery, .quarantine].contains(state.selectedSection) { return false }
                 guard !state.isScanning else { return false }
                 state.scan(urls: urls)
                 return true

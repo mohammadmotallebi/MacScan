@@ -87,6 +87,12 @@ struct MacScanApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(state.network.isChecking)
+                Button("Check Battery Usage") {
+                    state.selectedSection = .battery
+                    state.battery.refresh()
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .disabled(state.battery.isChecking)
                 Divider()
                 Button("Cancel Scan") { state.cancelScan() }
                     .keyboardShortcut(".", modifiers: [.command])

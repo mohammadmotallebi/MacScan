@@ -140,3 +140,36 @@ import Testing
         #expect(session.findings.allSatisfy { $0.area == .runningProcesses })
     }
 }
+
+@Suite struct FullCheckTrendTests {
+    func session(daysAgo: Double, fullCheck: Bool = true, status: ScanStatus = .completed,
+                 threats: Int = 0, warnings: Int = 0, passed: Int? = nil) -> ScanSession {
+        var s = ScanSession(startedAt: Date(timeIntervalSinceNow: -daysAgo * 86_400), targets: ["Applications"])
+        s.status = status
+        if fullCheck {
+            s.fullCheck = FullCheckInfo(security: passed.map { PostureSummary(passed: $0, total: 19, problems: []) })
+        }
+        s.findings = (0..<threats).map { _ in Finding(path: "/t", severity: .threat, engine: .yara, reason: "r") }
+            + (0..<warnings).map { _ in Finding(path: "/w", severity: .warning, engine: .yara, reason: "r") }
+        return s
+    }
+
+    @Test func onlyFinishedFullChecksOldestFirst() {
+        let history = [
+            session(daysAgo: 1, threats: 1, warnings: 2, passed: 18),
+            session(daysAgo: 2, fullCheck: false, threats: 5),
+            session(daysAgo: 3, status: .cancelled),
+            session(daysAgo: 4, warnings: 4),
+        ]
+        let points = FullCheckTrend.points(from: history)
+        #expect(points.map(\.warnings) == [4, 2])
+        #expect(points[1].threats == 1 && points[1].securityPassed == 18 && points[1].securityTotal == 19)
+        #expect(points[0].securityPassed == nil)
+    }
+
+    @Test func keepsOnlyTheLatest() {
+        let history = (1...20).map { session(daysAgo: Double($0), warnings: $0) }
+        let points = FullCheckTrend.points(from: history, limit: 5)
+        #expect(points.map(\.warnings) == [5, 4, 3, 2, 1])
+    }
+}
