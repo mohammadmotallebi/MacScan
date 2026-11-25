@@ -17,7 +17,9 @@ final class DiskUsageModel {
 
     struct PendingTrash: Identifiable {
         let id = UUID()
-        let item: DiskItem
+        /// One or more items picked in a list.
+        let items: [DiskItem]
+        var size: Int64 { items.reduce(0) { $0 + $1.size } }
     }
 
     /// "Move All to Trash" for a group of suggestions (e.g. every node_modules), waiting for confirmation.
@@ -283,29 +285,49 @@ final class DiskUsageModel {
     }
 
     func requestTrash(_ item: DiskItem) {
-        if let why = trashRefusal(item) {
-            errorMessage = why
+        requestTrash([item])
+    }
+
+    /// Asks to move several items. Items that can't be moved are left out (with a note if none can);
+    /// an item inside another picked folder goes with that folder.
+    func requestTrash(_ items: [DiskItem]) {
+        let allowed = items.filter { trashRefusal($0) == nil }
+        guard !allowed.isEmpty else {
+            errorMessage = items.first.flatMap(trashRefusal)
             return
         }
-        pendingTrash = PendingTrash(item: item)
+        let paths = allowed.map(\.path)
+        let outermost = allowed.filter { item in !paths.contains { item.path.hasPrefix($0 + "/") } }
+        pendingTrash = PendingTrash(items: outermost)
+    }
+
+    /// The items in `items` that can be moved to the Trash.
+    func movable(_ items: [DiskItem]) -> [DiskItem] {
+        items.filter { trashRefusal($0) == nil }
     }
 
     /// Called only after the user confirms.
     func confirmTrash(_ pending: PendingTrash) {
-        let item = pending.item
-        do {
-            var resulting: NSURL?
-            try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
-            report?.markRemoved(item)
-            refreshSuggestions()
-            logger.info("Disk usage: user moved to Trash \(item.path) (\(item.size) bytes)")
-        } catch {
-            logger.error("Disk usage: Move to Trash failed for \(item.path): \(error.localizedDescription)")
-            var message = error.localizedDescription
-            if PermissionErrors.isPermissionDenied(error) {
-                message += "\n\nIt may belong to another user or be protected by macOS. Full Disk Access for MacScan can help, or move it yourself in Finder."
+        var failures: [String] = []
+        var denied = false
+        for item in pending.items {
+            do {
+                var resulting: NSURL?
+                try FileManager.default.trashItem(at: item.url, resultingItemURL: &resulting)
+                report?.markRemoved(item)
+                logger.info("Disk usage: user moved to Trash \(item.path) (\(item.size) bytes)")
+            } catch {
+                logger.error("Disk usage: Move to Trash failed for \(item.path): \(error.localizedDescription)")
+                failures.append(pending.items.count == 1 ? error.localizedDescription : "\(item.name): \(error.localizedDescription)")
+                denied = denied || PermissionErrors.isPermissionDenied(error)
             }
-            errorMessage = message
         }
+        refreshSuggestions()
+        guard !failures.isEmpty else { return }
+        var message = failures.prefix(5).joined(separator: "\n") + (failures.count > 5 ? "\n…and \(failures.count - 5) more" : "")
+        if denied {
+            message += "\n\nIt may belong to another user or be protected by macOS. Full Disk Access for MacScan can help, or move it yourself in Finder."
+        }
+        errorMessage = message
     }
 }

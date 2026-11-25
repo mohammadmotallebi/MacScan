@@ -135,6 +135,7 @@ extension ScanTrigger {
         case .downloads: "arrow.down.circle"
         case .startupItems: "power.circle"
         case .newApps: "app.badge"
+        case .battery: "battery.75percent"
         }
     }
 }

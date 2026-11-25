@@ -75,6 +75,18 @@ public struct PersistenceLocations: Sendable {
     func user(_ relative: String) -> URL { home.appendingPathComponent(relative, isDirectory: true) }
 }
 
+extension PersistenceInventory {
+    /// The files to scan for the given snapshot keys: each item's plist (or file) and its program.
+    func paths(forKeys keys: Set<String>) -> Set<String> {
+        var paths: Set<String> = []
+        for entry in entries where keys.contains(StartupItemState.make(entry).key) {
+            paths.insert(entry.source)
+            if let program = entry.program { paths.insert(program) }
+        }
+        return paths
+    }
+}
+
 public struct PersistenceInventory: Sendable {
     public var entries: [PersistenceEntry] = []
     /// One finding per startup item (engine `.persistence`), any severity.

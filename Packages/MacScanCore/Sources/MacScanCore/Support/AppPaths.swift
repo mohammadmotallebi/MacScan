@@ -82,6 +82,10 @@ public enum AppPaths {
     }
 
     /// The sensitive permissions seen at the last permission watch.
+    public static var batteryWatchFile: URL {
+        applicationSupport.appendingPathComponent("battery-watch.json")
+    }
+
     public static var permissionWatchFile: URL {
         applicationSupport.appendingPathComponent("permission-watch.json")
     }

@@ -24,7 +24,9 @@ struct ContentView: View {
                     SidebarRow(title: "Battery", symbol: "battery.75percent", color: .yellow)
                         .tag(AppSection.battery)
                 }
-                Section("Clean up") {
+                Section("Apps & space") {
+                    SidebarRow(title: "Install", symbol: "square.and.arrow.down.fill", color: .teal)
+                        .tag(AppSection.install)
                     SidebarRow(title: "Uninstall", symbol: "trash.fill", color: .red)
                         .tag(AppSection.uninstall)
                     SidebarRow(title: "Disk Usage", symbol: "chart.pie.fill", color: .orange)
@@ -57,6 +59,7 @@ struct ContentView: View {
                 case .privacy: PrivacyView()
                 case .network: NetworkView()
                 case .battery: BatteryView()
+                case .install: InstallView()
                 case .quarantine: QuarantineView()
                 }
             }
@@ -73,6 +76,11 @@ struct ContentView: View {
                     guard !state.diskUsage.isScanning,
                           let folder = urls.first(where: { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }) else { return false }
                     state.diskUsage.scan(folder)
+                    return true
+                }
+                if state.selectedSection == .install {
+                    guard let url = urls.first(where: { InstallerKind.of($0) != nil }) else { return false }
+                    state.installer.load(url, state: state)
                     return true
                 }
                 // These sections have nothing to drop onto.

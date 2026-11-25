@@ -24,8 +24,10 @@ struct BatteryView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .navigationTitle("Battery")
         .task {
-            if model.report == nil { model.refresh() }
+            if model.report == nil && !model.live { model.refresh() }
         }
+        .onAppear { model.startLive() }
+        .onDisappear { model.stopLive() }
     }
 
     @ViewBuilder
@@ -154,16 +156,20 @@ struct BatteryView: View {
         let symbol = battery?.percent.map { $0 > 75 ? "battery.100percent" : $0 > 40 ? "battery.75percent" : $0 > 15 ? "battery.25percent" : "battery.0percent" } ?? "bolt.fill"
         return SectionHeader(title: "Battery", subtitle: subtitle, symbol: battery?.charging == true ? "battery.100percent.bolt" : symbol,
                              color: heavy > 0 ? .orange : .yellow, chips: chips, isBusy: model.isChecking) {
-            Toggle("Hide macOS", isOn: $model.hideSystem)
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .help("Hide macOS's own services")
+            VStack(alignment: .leading, spacing: 4) {
+                Toggle("Live", isOn: $model.live)
+                    .help("Measure again every 5 seconds while this section is open")
+                Toggle("Hide macOS", isOn: $model.hideSystem)
+                    .help("Hide macOS's own services")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
             Button {
                 model.refresh()
             } label: {
                 Label("Check Again", systemImage: "arrow.clockwise")
             }
-            .disabled(model.isChecking)
+            .disabled(model.isChecking || model.live)
         }
     }
 }
@@ -215,7 +221,7 @@ private struct EnergyRow<Trailing: View>: View {
         HStack(spacing: 12) {
             Group {
                 if let path = app.path {
-                    Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable()
+                    Image(nsImage: model.icon(for: path)).resizable()
                 } else {
                     Image(systemName: app.isSystem ? "gearshape.fill" : "questionmark.app.dashed").resizable().scaledToFit()
                         .padding(3).foregroundStyle(.secondary)

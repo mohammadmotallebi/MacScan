@@ -37,6 +37,7 @@ extension ScanSettings {
         var s = ScanSettings()
         s.watchStartupItems = false
         s.watchNewApps = false
+        s.watchBattery = false
         return s
     }
 }
@@ -632,6 +633,41 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         #expect(notifier.sent.count == 1)
     }
 
+    @Test func startupWatchOnlyScansWhatChanged() async throws {
+        let dir = try TempDir()
+        let notifier = NotificationRecorder()
+        var env = try makeEnv(dir, notifier: notifier)
+        let seen = ScannedPaths()
+        env.coordinator = ScanCoordinator(engines: [RecordingEngine(seen: seen)], settings: env.settings, logger: logger,
+                                          persistenceLocations: env.coordinator.persistenceLocations)
+        try dir.write("bin/old-tool", "x")
+        try dir.write("bin/new-tool", "x")
+        try writeAgent(dir, label: "com.example.old", program: dir.url.appendingPathComponent("bin/old-tool").path)
+
+        // First run: everything is scanned and becomes the starting point.
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+        #expect(seen.paths.contains { $0.hasSuffix("old-tool") })
+
+        // Only MacScan's own agent changed: no scan at all.
+        seen.reset()
+        try writeAgent(dir, label: BackgroundAgent.label(for: .battery), program: "/usr/bin/true")
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+        #expect(seen.paths.isEmpty)
+
+        // A new item: only it and its program are scanned.
+        try writeAgent(dir, label: "com.example.new", program: dir.url.appendingPathComponent("bin/new-tool").path)
+        let session = try #require(await BackgroundScanWorker.run(.startupItems, environment: env).first)
+        #expect(seen.paths.contains { $0.hasSuffix("new-tool") } && seen.paths.contains { $0.hasSuffix("com.example.new.plist") })
+        #expect(!seen.paths.contains { $0.hasSuffix("old-tool") || $0.hasSuffix("com.example.old.plist") })
+        #expect(BackgroundScanWorker.newStartupItems(in: session).map(BackgroundScanWorker.itemName) == ["com.example.new"])
+
+        // Touched but not changed: listed again, nothing scanned.
+        seen.reset()
+        try writeAgent(dir, label: "com.example.old", program: dir.url.appendingPathComponent("bin/old-tool").path)
+        #expect(await BackgroundScanWorker.run(.startupItems, environment: env).isEmpty)
+        #expect(seen.paths.isEmpty)
+    }
+
     @Test func watcherAgentsWatchTheRightFolders() throws {
         let agent = BackgroundAgent(executable: URL(fileURLWithPath: "/Applications/MacScan.app/Contents/MacOS/MacScan"),
                                     startupFolders: [URL(fileURLWithPath: "/a")], appFolders: [URL(fileURLWithPath: "/b"), URL(fileURLWithPath: "/c")])
@@ -696,5 +732,31 @@ final class NotificationRecorder: BackgroundNotifying, @unchecked Sendable {
         #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 30, hour: 9, minute: 30)))
         s.scheduleWeekday = 7   // Sunday
         #expect(BackgroundSchedule.nextRun(s, after: now, calendar: cal) == cal.date(from: DateComponents(year: 2026, month: 11, day: 29, hour: 9, minute: 30)))
+    }
+}
+
+
+final class ScannedPaths: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _paths: [String] = []
+    var paths: [String] { lock.withLock { _paths } }
+    func add(_ path: String) { lock.withLock { _paths.append(path) } }
+    func reset() { lock.withLock { _paths.removeAll() } }
+}
+
+/// Notes every file the scan engines were given.
+struct RecordingEngine: ScanEngine {
+    let id = EngineID.clamav
+    let displayName = "Recording"
+    let seen: ScannedPaths
+
+    func availability() async -> EngineAvailability { .available(detail: "test") }
+    func handles(_ item: ScanItem) -> Bool { true }
+    func scan(_ items: [ScanItem], context: ScanContext, events: @escaping EngineEventSink) async throws {
+        for item in items {
+            seen.add(item.path)
+            await events(.itemStarted(item.path))
+            await events(.itemFinished(item.path))
+        }
     }
 }

@@ -44,6 +44,7 @@ public struct BackgroundAgent: Sendable {
         case .downloads: labelPrefix + "downloads-watcher"
         case .startupItems: labelPrefix + "startup-watcher"
         case .newApps: labelPrefix + "apps-watcher"
+        case .battery: labelPrefix + "battery-watcher"
         }
     }
 
@@ -119,6 +120,9 @@ public struct BackgroundAgent: Sendable {
             guard settings.watchNewApps else { return nil }
             job["WatchPaths"] = appFolders.map(\.path)
             job["ThrottleInterval"] = 30
+        case .battery:
+            guard settings.watchBattery else { return nil }
+            job["StartInterval"] = Int(BatteryWatcher.interval)
         }
         return job
     }

@@ -395,6 +395,8 @@ struct BackgroundSettingsView: View {
                 SettingsHint("When something is added to or changed in a LaunchAgents or LaunchDaemons folder, MacScan checks it and tells you what it runs and who signed it. Malware almost always adds a startup item.")
                 Toggle("Scan new apps", isOn: $state.settings.watchNewApps)
                 SettingsHint("When an app arrives in or is updated in /Applications or ~/Applications, MacScan scans it. You only hear about it when something looks wrong.")
+                Toggle("Alert when an app drains the battery", isOn: $state.settings.watchBattery)
+                SettingsHint("On battery, MacScan checks energy use every 5 minutes. If an app stays high for 15 minutes, you get one notification (at most once a day per app). It never quits anything.")
             } header: {
                 SettingsHeader(title: "Live protection", symbol: "bolt.shield.fill", color: .green)
             }
@@ -577,6 +579,7 @@ struct BackgroundStatusSection: View {
         case .downloads: state.settings.watchDownloads
         case .startupItems: state.settings.watchStartupItems
         case .newApps: state.settings.watchNewApps
+        case .battery: state.settings.watchBattery
         }
     }
 
@@ -586,6 +589,7 @@ struct BackgroundStatusSection: View {
         case .downloads: "New downloads"
         case .startupItems: "Startup items"
         case .newApps: "New apps"
+        case .battery: "Battery watch"
         }
     }
 
@@ -595,6 +599,7 @@ struct BackgroundStatusSection: View {
         case .downloads: .blue
         case .startupItems: .red
         case .newApps: .purple
+        case .battery: .yellow
         }
     }
 
@@ -651,6 +656,7 @@ struct BackgroundStatusSection: View {
     }
 
     private func nextLine(_ trigger: ScanTrigger) -> String {
+        if trigger == .battery { return "Every 5 minutes, only on battery" }
         guard trigger == .scheduled else { return "Next: when something changes" }
         guard let next = BackgroundSchedule.nextRun(state.settings) else { return "" }
         let time = next.formatted(date: .omitted, time: .shortened)

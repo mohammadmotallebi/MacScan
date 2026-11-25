@@ -30,6 +30,7 @@ struct UserNotifier: BackgroundNotifying {
         content.body = notification.body
         content.sound = .default
         if let id = notification.sessionID { content.userInfo = [sessionIDKey: id.uuidString] }
+        if let section = notification.section { content.userInfo = [sectionKey: section] }
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         do {
             try await UNUserNotificationCenter.current().add(request)
@@ -80,6 +81,8 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
 
     /// Set by `AppState`: opens the Privacy section.
     var openPrivacy: (() -> Void)?
+    /// Set by `AppState`: opens the Battery section.
+    var openBattery: (() -> Void)?
 
     func install() {
         UNUserNotificationCenter.current().delegate = self
@@ -90,9 +93,14 @@ final class NotificationRouter: NSObject, UNUserNotificationCenterDelegate {
     }
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        if response.notification.request.content.userInfo[sectionKey] as? String == "privacy" {
+        switch response.notification.request.content.userInfo[sectionKey] as? String {
+        case "privacy":
             await MainActor.run { NotificationRouter.shared.openPrivacy?() }
             return
+        case "battery":
+            await MainActor.run { NotificationRouter.shared.openBattery?() }
+            return
+        default: break
         }
         guard let raw = response.notification.request.content.userInfo[sessionIDKey] as? String, let id = UUID(uuidString: raw) else { return }
         await MainActor.run { NotificationRouter.shared.route(id) }

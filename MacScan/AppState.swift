@@ -13,6 +13,7 @@ enum AppSection: Hashable {
     case privacy
     case network
     case battery
+    case install
     case quarantine
 }
 
@@ -115,6 +116,7 @@ final class AppState {
     let privacy = PrivacyModel()
     let network = NetworkModel()
     let battery = BatteryModel()
+    let installer = InstallModel()
 
     // MARK: UI state
 
@@ -185,6 +187,12 @@ final class AppState {
             guard let self else { return }
             self.selectedSection = .privacy
             self.privacy.refresh()
+            self.bringToFront()
+        }
+        NotificationRouter.shared.openBattery = { [weak self] in
+            guard let self else { return }
+            self.selectedSection = .battery
+            self.battery.refresh()
             self.bringToFront()
         }
         // Background scans save to history while the app is open or closed: pick them up when MacScan comes forward.
@@ -261,6 +269,7 @@ final class AppState {
             && settings.watchDownloads == old.watchDownloads
             && settings.watchStartupItems == old.watchStartupItems
             && settings.watchNewApps == old.watchNewApps
+            && settings.watchBattery == old.watchBattery
             && settings.scheduleFrequency == old.scheduleFrequency
             && settings.scheduleWeekday == old.scheduleWeekday
             && settings.scheduleHour == old.scheduleHour
@@ -286,6 +295,21 @@ final class AppState {
             if settings.watchNewApps { baselineApps(force: true) } else { Self.appTrackers.forEach { $0.forget() } }
         }
         syncBackgroundAgent()
+    }
+
+    /// Saves a scan made outside the Scan section (an install check) to History.
+    func saveToHistory(_ session: ScanSession) {
+        history.insert(session, at: 0)
+        do {
+            try historyStore.save(session)
+        } catch {
+            logger.error("Could not save scan history: \(error.localizedDescription)")
+        }
+    }
+
+    /// After MacScan installs an app: the new-app watcher doesn't need to scan it again.
+    func markAppsSeen() {
+        if settings.watchNewApps { baselineApps(force: true) }
     }
 
     static var appTrackers: [DownloadsTracker] {
@@ -330,6 +354,7 @@ final class AppState {
         if settings.watchNewApps { baselineApps(force: false) }
         let enabled: [ScanTrigger] = (settings.scheduledScanEnabled ? [.scheduled] : []) + (settings.watchDownloads ? [.downloads] : [])
             + (settings.watchStartupItems ? [.startupItems] : []) + (settings.watchNewApps ? [.newApps] : [])
+            + (settings.watchBattery ? [.battery] : [])
         let broken = enabled.contains { trigger in
             guard let installed = agent.installedExecutable(for: trigger) else { return true }
             return !FileManager.default.fileExists(atPath: installed)

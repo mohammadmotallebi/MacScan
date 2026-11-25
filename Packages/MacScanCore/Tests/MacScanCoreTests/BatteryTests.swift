@@ -61,20 +61,24 @@ import Testing
             LiveProcess(pid: 20, uid: 88, name: "WindowServer", path: "/System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer"),
             LiveProcess(pid: 1144, uid: 501, name: "Spotify", path: "/Applications/Spotify.app/Contents/MacOS/Spotify"),
             LiveProcess(pid: 743, uid: 202, name: "coreaudiod", path: "/usr/sbin/coreaudiod"),
+            LiveProcess(pid: 40, uid: 501, name: "com.docker.backend", path: "/Applications/Docker.app/Contents/MacOS/com.docker.backend"),
+            LiveProcess(pid: 50, uid: 501, name: "MacScan", path: "/Applications/MacScan.app/Contents/MacOS/MacScan"),
+            LiveProcess(pid: 51, parentPID: 50, uid: 501, name: "clamscan", path: "/opt/homebrew/bin/clamscan"),
+            LiveProcess(pid: 30, uid: 501, name: "com.apple.Virtua", path: "/System/Library/Frameworks/Virtualization.framework/Versions/A/XPCServices/com.apple.Virtualization.VirtualMachine.xpc/Contents/MacOS/com.apple.Virtualization.VirtualMachine"),
         ])
         let outputs: [String: String] = [
             "batt": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=1)\t60%; discharging; 3:00 remaining present: true",
             "assertions": Self.assertions,
-            "top": "PID POWER %CPU COMMAND\n10 4.0 4.0 Code\n11 30.0 30.0 Code Helper\n20 12.0 12.0 WindowServer\n1144 0.2 0.2 Spotify\n743 1.0 1.0 coreaudiod\n",
+            "top": "PID POWER %CPU COMMAND\n10 4.0 4.0 Code\n11 30.0 30.0 Code Helper\n20 12.0 12.0 WindowServer\n1144 0.2 0.2 Spotify\n743 1.0 1.0 coreaudiod\n30 9.0 9.0 com.apple.Virtua\n51 60.0 60.0 clamscan\n",
         ]
         let scanner = BatteryScanner(run: { _, args in
             PostureCommandOutput(text: args.contains("batt") ? outputs["batt"]! : args.contains("assertions") ? outputs["assertions"]! : outputs["top"]!)
         }, processes: processes, usage: { pid in
             pid == 10 ? (3600, Date(timeIntervalSince1970: 100)) : pid == 11 ? (1800, Date(timeIntervalSince1970: 50)) : nil
-        })
+        }, responsible: { $0 == 30 ? 40 : $0 == 20 ? 1 : nil })
         let report = await scanner.scan()
         #expect(report.state.percent == 60 && report.state.onBattery)
-        let code = try! #require(report.apps.first)
+        let code = try! #require(report.apps.first { $0.name == "Code" })
         #expect(code.name == "Code" && code.impact == 34 && code.level == .high && code.pids == [10, 11])
         #expect(code.usedWh == 1.5 && code.startedAt == Date(timeIntervalSince1970: 50))
         #expect(report.apps.first { $0.name == "WindowServer" }?.isSystem == true)
@@ -84,9 +88,14 @@ import Testing
         #expect(report.apps.first { $0.name == "coreaudiod" }?.blockers.isEmpty == true)
         // Not running in top's list but holding a blocker: still shown.
         #expect(report.apps.contains { $0.name == "Keynote" && $0.blockers.first?.keepsScreenOn == true })
-        #expect(report.usingNow.map(\.name) == ["Code", "WindowServer", "coreaudiod"])
+        // The virtual machine counts for Docker, which started it.
+        #expect(report.apps.first { $0.name == "Docker" }.map { ($0.impact, $0.isSystem) } ?? (0, true) == (9, false))
+        // A scan tool MacScan started says so.
+        let clam = try! #require(report.apps.first { $0.name == "clamscan" })
+        #expect(clam.byMacScan && clam.hint == "Started by MacScan for a scan; it stops when the scan ends")
+        #expect(report.usingNow.map(\.name) == ["clamscan", "Code", "WindowServer", "Docker", "coreaudiod"])
         #expect(report.usedMost.map(\.name) == ["Code"])
-        #expect(report.heavy == 1)
+        #expect(report.heavy == 2)
     }
 
     /// Read-only look at this Mac: MACSCAN_BATTERY_PROBE=1 swift test --filter realBatteryProbe
@@ -98,5 +107,78 @@ import Testing
         for app in report.usedMost.prefix(8) { print(String(format: "used %6.2f Wh %@", app.usedWh ?? 0, app.name), app.startedAt ?? "-") }
         for app in report.blockers { print("awake:", app.name, app.blockers.map(\.reason)) }
         #expect(!report.apps.isEmpty)
+    }
+}
+
+@Suite struct BatteryWatcherTests {
+    /// Never the user's real MacScan log.
+    let logger = FileLogger(directory: FileManager.default.temporaryDirectory.appendingPathComponent("MacScanTestLogs"))
+
+    func app(_ name: String, impact: Double, system: Bool = false) -> EnergyApp {
+        EnergyApp(id: "/Applications/\(name).app", name: name, path: "/Applications/\(name).app", pids: [1], isSystem: system,
+                  impact: impact, usedWh: nil, startedAt: nil, blockers: [])
+    }
+
+    func report(_ apps: [EnergyApp], onBattery: Bool = true) -> BatteryReport {
+        BatteryReport(state: BatteryState(percent: 50, onBattery: onBattery, charging: false, remaining: nil), apps: apps, takenAt: Date(), problem: nil)
+    }
+
+    @Test func alertsAfterThreeHighChecksOnBatteryOncePerDay() throws {
+        let dir = try TempDir()
+        let watcher = BatteryWatcher(file: dir.url.appendingPathComponent("watch.json"))
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        func at(_ n: Int) -> Date { start.addingTimeInterval(Double(n) * BatteryWatcher.interval) }
+        let heavy = [app("Motrix", impact: 40), app("WindowServer", impact: 60, system: true), app("Notes", impact: 2)]
+
+        #expect(watcher.check(report(heavy), now: at(0)).isEmpty)
+        #expect(watcher.check(report(heavy), now: at(1)).isEmpty)
+        #expect(watcher.check(report(heavy), now: at(2)).map(\.name) == ["Motrix"])
+        #expect(BatteryWatcher.message(for: heavy[0]) == "Motrix has been using a lot of energy for 15 min.")
+        // Not again the same day.
+        #expect(watcher.check(report(heavy), now: at(3)).isEmpty)
+    }
+
+    @Test func pluggedInDropOrGapStartsOver() throws {
+        let dir = try TempDir()
+        let watcher = BatteryWatcher(file: dir.url.appendingPathComponent("watch.json"))
+        let start = Date(timeIntervalSince1970: 2_000_000)
+        func at(_ n: Double) -> Date { start.addingTimeInterval(n * BatteryWatcher.interval) }
+        let heavy = [app("Motrix", impact: 40)]
+        _ = watcher.check(report(heavy), now: at(0))
+        _ = watcher.check(report(heavy), now: at(1))
+        _ = watcher.check(report(heavy, onBattery: false), now: at(2))          // plugged in
+        #expect(watcher.check(report(heavy), now: at(3)).isEmpty)
+        _ = watcher.check(report([app("Motrix", impact: 3)]), now: at(4))       // calmed down
+        _ = watcher.check(report(heavy), now: at(5))
+        _ = watcher.check(report(heavy), now: at(6))
+        #expect(watcher.check(report(heavy), now: at(10)).isEmpty, "a long gap (sleep) starts over")
+    }
+
+    @Test func workerNotifiesAndRecordsStatus() async throws {
+        let dir = try TempDir()
+        let watcher = BatteryWatcher(file: dir.url.appendingPathComponent("watch.json"))
+        let status = BackgroundStatusStore(file: dir.url.appendingPathComponent("status.json"))
+        let notifier = NotificationRecorder()
+        let heavy = report([app("Motrix", impact: 40)])
+        let start = Date(timeIntervalSince1970: 3_000_000)
+        for n in 0..<3 {
+            await BackgroundScanWorker.runBatteryWatch(settings: ScanSettings(), notifier: notifier, read: { heavy }, watcher: watcher,
+                                                       status: status, logger: logger, now: start.addingTimeInterval(Double(n) * 300))
+        }
+        #expect(notifier.sent == [BackgroundNotification(title: "Using a lot of battery", body: "Motrix has been using a lot of energy for 15 min.", section: "battery")])
+        #expect(status.load()[.battery]?.summary == "Alerted: Motrix" && status.load()[.battery]?.noteworthy == true)
+
+        var off = ScanSettings()
+        off.watchBattery = false
+        await BackgroundScanWorker.runBatteryWatch(settings: off, notifier: notifier, read: { heavy }, watcher: watcher, status: status, logger: logger)
+        #expect(status.load()[.battery]?.summary == "Skipped: turned off")
+    }
+
+    @Test func agentRunsEveryFiveMinutes() {
+        let agent = BackgroundAgent(executable: URL(fileURLWithPath: "/Applications/MacScan.app/Contents/MacOS/MacScan"))
+        #expect(agent.job(for: .battery, settings: ScanSettings())?["StartInterval"] as? Int == 300)
+        var off = ScanSettings()
+        off.watchBattery = false
+        #expect(agent.job(for: .battery, settings: off) == nil)
     }
 }

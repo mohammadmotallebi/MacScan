@@ -341,6 +341,34 @@ MacScan never blocks or closes anything, and it doesn't look up host names, so t
 Without administrator rights only your own programs are visible.
 
 
+### Install
+
+**Install** in the sidebar (⇧⌘I) checks an app before it goes into Applications. Drop a `.dmg`, `.zip`,
+`.app` or `.pkg` onto it, choose one, or pick a recent download.
+
+1. MacScan opens it without running anything: disk images are mounted read-only and hidden, zips and
+   packages are unpacked into a temporary folder.
+2. Every app inside is scanned (ClamAV, YARA, signature, notarization, VirusTotal if set up). The card shows
+   who signed it, whether macOS would allow it, the version, and what it carries inside (helpers that run as
+   administrator, background agents, login items, system extensions).
+3. It's compared with the copy you have: update or older, and above all **signed by a different developer**,
+   the sign of a fake update.
+4. **Install** (or **Replace**) copies it into /Applications after you agree. The old copy goes to the Trash.
+   A running app must quit first. The password is asked only when needed. The download flag stays on, so
+   Gatekeeper still checks the app when it first opens. Flagged apps need **Install Anyway…** and a second yes.
+5. For a `.pkg`, MacScan shows its signature and its install scripts (they run as administrator) and flags
+   scripts that download things or add startup items. **Open in Installer** hands it to Apple's Installer;
+   MacScan never runs a package itself.
+
+The check is saved to History as "Install check: <file>". Afterwards MacScan can move the installer to the Trash.
+
+### Disk Usage
+
+**Disk Usage** in the sidebar (⇧⌘D) measures a folder and lists its largest files and folders, with a
+Cleanup tab of things that are usually safe to remove. Select several rows with ⌘-click or ⇧-click: a bar
+shows how many and how big, with one **Move to Trash…** and one confirmation. Right-click works on the
+whole selection. System and standard folders (Downloads, Documents, …) are never moved.
+
 ### Battery
 
 **Battery** in the sidebar (⇧⌘B) shows which apps and services use energy. MacScan only looks; it never
@@ -353,6 +381,8 @@ quits or slows anything.
   macOS doesn't share this for its own services or other users' programs.
 - **Keeping your Mac awake**: what stops the Mac or its screen from sleeping (from `pmset -g assertions`).
   Audio held by macOS for an app is shown under that app.
+- macOS helpers count for the app that started them: Docker's virtual machine shows as Docker.
+- **Live** re-measures every 5 seconds while the section is open.
 - The header shows charge and whether the Mac is on battery. The home screen has a Battery card.
 
 ### Quarantine
@@ -430,6 +460,9 @@ The two live-protection watchers below are on by default.
 - **Scan new apps** (on by default) scans apps that arrive in `/Applications` or `~/Applications` once
   they stop changing. You only get a notification when something is flagged. The apps already there when
   it's turned on are marked as seen (`apps-seen-*.json`).
+- **Alert when an app drains the battery** (on by default) checks energy use every 5 minutes, only while
+  on battery. An app (not macOS) that stays High for 15 minutes gets one notification, at most once a day
+  per app ("Motrix has been using a lot of energy for 15 min."). Clicking it opens Battery.
 - **Scan new downloads** scans each new item that arrives in `~/Downloads`. Items that were already there
   when you turned it on are not scanned, and unfinished downloads (`.crdownload`, `.download`, `.part`)
   wait until they are complete.

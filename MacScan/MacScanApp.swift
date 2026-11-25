@@ -87,6 +87,12 @@ struct MacScanApp: App {
                 }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(state.network.isChecking)
+                Button("Install an App…") {
+                    state.selectedSection = .install
+                    state.installer.choose(state: state)
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(state.installer.isBusy)
                 Button("Check Battery Usage") {
                     state.selectedSection = .battery
                     state.battery.refresh()

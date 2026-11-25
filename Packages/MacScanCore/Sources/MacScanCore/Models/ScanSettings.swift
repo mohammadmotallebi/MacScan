@@ -57,11 +57,13 @@ public struct ScanSettings: Codable, Hashable, Sendable {
     public var watchNewApps: Bool = true
     /// While MacScan runs, tell the user when an app gets camera, microphone, screen, keyboard or Full Disk Access.
     public var watchPermissions: Bool = true
+    /// Alert when an app uses a lot of energy for a while on battery (launchd starts a check every 5 minutes).
+    public var watchBattery: Bool = true
 
     public init() {}
 
     /// True when any background (launchd-started) scan is turned on.
-    public var backgroundScansEnabled: Bool { scheduledScanEnabled || watchDownloads || watchStartupItems || watchNewApps }
+    public var backgroundScansEnabled: Bool { scheduledScanEnabled || watchDownloads || watchStartupItems || watchNewApps || watchBattery }
 
     public var maxFileSizeBytes: Int64 { Int64(max(1, maxFileSizeMB)) * 1024 * 1024 }
 
@@ -105,6 +107,7 @@ public struct ScanSettings: Codable, Hashable, Sendable {
         showInMenuBar = try c.decodeIfPresent(Bool.self, forKey: .showInMenuBar) ?? d.showInMenuBar
         watchStartupItems = try c.decodeIfPresent(Bool.self, forKey: .watchStartupItems) ?? d.watchStartupItems
         watchNewApps = try c.decodeIfPresent(Bool.self, forKey: .watchNewApps) ?? d.watchNewApps
+        watchBattery = try c.decodeIfPresent(Bool.self, forKey: .watchBattery) ?? d.watchBattery
         watchPermissions = try c.decodeIfPresent(Bool.self, forKey: .watchPermissions) ?? d.watchPermissions
     }
 }

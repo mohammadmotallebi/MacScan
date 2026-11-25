@@ -143,9 +143,13 @@ public struct EnergyApp: Identifiable, Hashable, Sendable {
     public var startedAt: Date?
     /// What it keeps awake, if anything.
     public var blockers: [SleepBlocker]
+    /// A tool MacScan itself started (clamscan, yara, codesign during a scan).
+    public var byMacScan = false
 
     /// A plain note on what a busy macOS service does.
     public var hint: String? {
+        if byMacScan { return "Started by MacScan for a scan; it stops when the scan ends" }
+        if path?.hasSuffix("/MacScan.app") == true { return "This app. Measuring energy takes a moment of work" }
         let lower = name.lowercased()
         if lower == "windowserver" { return "Draws everything on screen" }
         if lower == "kernel_task" { return "macOS itself; also keeps the Mac cool" }
@@ -195,13 +199,17 @@ public struct BatteryScanner: Sendable {
     var run: Runner
     var processes: any ProcessListing
     var usage: Usage
+    /// The process macOS holds responsible for another (Docker for its virtual machine).
+    var responsible: @Sendable (Int32) -> Int32?
 
     public init(run: @escaping Runner = SecurityPosture.systemRunner,
                 processes: any ProcessListing = SystemProcessList(),
-                usage: @escaping Usage = BatteryScanner.systemUsage) {
+                usage: @escaping Usage = BatteryScanner.systemUsage,
+                responsible: @escaping @Sendable (Int32) -> Int32? = BatteryScanner.systemResponsible) {
         self.run = run
         self.processes = processes
         self.usage = usage
+        self.responsible = responsible
     }
 
     public func scan() async -> BatteryReport {
@@ -223,7 +231,13 @@ public struct BatteryScanner: Sendable {
 
         func key(for pid: Int32, command: String) -> String {
             if let key = keyOfPID[pid] { return key }
-            let process = live[pid]
+            var process = live[pid]
+            // A macOS helper started for an app (a virtual machine, a web view) counts for that app.
+            if let path = process?.path, ProcessScanner.isSealedSystemPath(path), process?.uid != 0,
+               let owner = responsible(pid), owner != pid, let ownerProcess = live[owner],
+               let ownerPath = ownerProcess.path, !ProcessScanner.isSealedSystemPath(ownerPath) {
+                process = ownerProcess
+            }
             let unit = process?.path.map { PersistenceScanner.enclosingApp(of: $0)?.path ?? $0 }
             let key = unit ?? "pid:\(pid)"
             if groups[key] == nil {
@@ -236,10 +250,13 @@ public struct BatteryScanner: Sendable {
             return key
         }
 
-        // MacScan's own measuring tool.
-        for reading in readings where !(reading.command == "top" && live[reading.pid]?.path == "/usr/bin/top") {
+        // MacScan's own measuring tool (it has already quit, so it's not in the process list).
+        for reading in readings where !(reading.command == "top" && live[reading.pid] == nil) {
             let k = key(for: reading.pid, command: reading.command)
             groups[k]!.pids.append(reading.pid)
+            if let parent = live[reading.pid]?.parentPID, Self.isMacScan(live[parent]?.path) {
+                groups[k]!.byMacScan = true
+            }
             groups[k]!.impact += reading.power
             if let used = usage(reading.pid) {
                 groups[k]!.usedWh = (groups[k]!.usedWh ?? 0) + used.joules / 3600
@@ -257,6 +274,18 @@ public struct BatteryScanner: Sendable {
         return groups.values
             .filter { !$0.pids.isEmpty || !$0.blockers.isEmpty }
             .sorted { $0.impact != $1.impact ? $0.impact > $1.impact : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    static func isMacScan(_ path: String?) -> Bool {
+        path?.hasSuffix("/MacScan.app/Contents/MacOS/MacScan") == true
+    }
+
+    /// Asks macOS which process is responsible for this one. Nil when unknown.
+    public static let systemResponsible: @Sendable (Int32) -> Int32? = { pid in
+        typealias Lookup = @convention(c) (pid_t) -> pid_t
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_get_pid_responsible_for_pid") else { return nil }
+        let owner = unsafeBitCast(symbol, to: Lookup.self)(pid)
+        return owner > 0 ? owner : nil
     }
 
     /// Energy since start (Apple silicon counts it per process) and start time. Only works for the user's own programs.

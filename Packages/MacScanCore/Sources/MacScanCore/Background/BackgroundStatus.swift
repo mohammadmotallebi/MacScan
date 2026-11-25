@@ -82,6 +82,7 @@ extension BackgroundScanWorker {
         case .downloads: settings.watchDownloads
         case .startupItems: settings.watchStartupItems
         case .newApps: settings.watchNewApps
+        case .battery: settings.watchBattery
         }
         guard enabled else { return BackgroundRunStatus(date: date, summary: "Skipped: turned off") }
         guard let last = sessions.last else { return BackgroundRunStatus(date: date, summary: "Nothing new") }
@@ -95,6 +96,8 @@ extension BackgroundScanWorker {
 
         let summary: String
         switch trigger {
+        case .battery:
+            summary = ""
         case .startupItems:
             let items = sessions.flatMap(newStartupItems(in:))
             let names = items.prefix(2).map(itemName).joined(separator: ", ") + (items.count > 2 ? " and \(items.count - 2) more" : "")

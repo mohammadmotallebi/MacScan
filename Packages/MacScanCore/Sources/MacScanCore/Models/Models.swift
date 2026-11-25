@@ -190,6 +190,8 @@ public enum ScanTrigger: String, Codable, Sendable, CaseIterable {
     case startupItems = "startup-items"
     /// An app arrived in or changed in /Applications or ~/Applications.
     case newApps = "new-apps"
+    /// A check every few minutes for apps using a lot of energy while on battery.
+    case battery
 
     public var title: String {
         switch self {
@@ -197,6 +199,7 @@ public enum ScanTrigger: String, Codable, Sendable, CaseIterable {
         case .downloads: "New downloads"
         case .startupItems: "Startup watch"
         case .newApps: "New apps"
+        case .battery: "Battery watch"
         }
     }
 }

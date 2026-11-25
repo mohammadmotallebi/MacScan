@@ -76,7 +76,10 @@ public struct ScanCoordinator: Sendable {
     }
 
     /// Never throws: cancellation and engine failures are recorded in the returned session.
-    public func run(targets: [ScanTarget], onProgress: @escaping @Sendable (ScanProgress) -> Void) async -> ScanSession {
+    /// `onlyPaths`: when set, the scan engines only look at these files and folders (and what's inside them).
+    /// Everything is still listed, so change tracking sees the full picture.
+    public func run(targets: [ScanTarget], onlyPaths: Set<String>? = nil,
+                    onProgress: @escaping @Sendable (ScanProgress) -> Void) async -> ScanSession {
         var session = ScanSession(targets: targets.map(\.displayName))
         logger.info("Scan started: \(session.targets.joined(separator: ", "))")
         onProgress(ScanProgress(phase: .enumerating))
@@ -93,7 +96,13 @@ public struct ScanCoordinator: Sendable {
         session.notes += enumeration.notes
         session.startupSnapshot = enumeration.startupSnapshot
         session.extensionSnapshot = enumeration.extensionSnapshot
-        session.itemsTotal = enumeration.items.count
+        let engineItems = onlyPaths.map { only in
+            enumeration.items.filter { item in
+                let path = item.url.path
+                return only.contains(path) || only.contains { path.hasPrefix($0 + "/") }
+            }
+        } ?? enumeration.items
+        session.itemsTotal = engineItems.count
         for issue in enumeration.issues.prefix(50) {
             logger.warning("Cannot read \(issue.path): \(issue.message)")
         }
@@ -115,7 +124,7 @@ public struct ScanCoordinator: Sendable {
         }
 
         // 3. Run engines concurrently over their items.
-        let items = enumeration.items
+        let items = engineItems
         let tracker = ProgressTracker(items: items, engines: active, onProgress: onProgress)
         await tracker.emit(force: true)
         let context = ScanContext(settings: settings, logger: logger)

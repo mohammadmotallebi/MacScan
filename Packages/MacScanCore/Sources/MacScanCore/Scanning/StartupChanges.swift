@@ -200,6 +200,44 @@ public struct StartupChangeTracker: Sendable {
         session.startupSnapshot = nil   // the baseline file holds it from here on
         session.startupChanges = ChangeTracking.apply(snapshot: snapshot, file: file, engine: .persistence, subject: "Startup items", session: &session)
     }
+
+    /// Keys of items that are new or changed since the baseline. Saves nothing. Nil when there's no baseline yet.
+    public func changedKeys(in snapshot: StartupSnapshot) -> Set<String>? {
+        guard let data = try? Data(contentsOf: file),
+              let baseline = try? JSONDecoder.macScan.decode(ChangeTracking.Baseline<StartupItemState>.self, from: data) else { return nil }
+        return Set(snapshot.filter { key, state in
+            baseline.items[key].map { !state.differences(from: $0).isEmpty } ?? true
+        }.keys)
+    }
+
+    /// Where the startup watcher keeps its quick fingerprint of the startup folders (next to the baseline).
+    var fingerprintFile: URL {
+        file.deletingLastPathComponent().appendingPathComponent("startup-watch-fingerprint.json")
+    }
+
+    /// Names, sizes and dates of the files in the startup folders, without MacScan's own agents.
+    /// Cheap to read; if it's the same as last time, nothing needs scanning.
+    static func fingerprint(of folders: [URL]) -> [String: String] {
+        var result: [String: String] = [:]
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey]
+        for folder in folders {
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { continue }
+            for name in names where !name.hasPrefix(BackgroundAgent.labelPrefix) {
+                let url = folder.appendingPathComponent(name)
+                let values = try? url.resourceValues(forKeys: Set(keys))
+                result[url.path] = "\(values?.fileSize ?? -1)@\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
+            }
+        }
+        return result
+    }
+
+    func loadFingerprint() -> [String: String]? {
+        (try? Data(contentsOf: fingerprintFile)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) }
+    }
+
+    func saveFingerprint(_ fingerprint: [String: String]) {
+        try? JSONEncoder().encode(fingerprint).write(to: fingerprintFile, options: .atomic)
+    }
 }
 
 /// The same for browser extensions: what was installed, or gained permissions, since the last scan.

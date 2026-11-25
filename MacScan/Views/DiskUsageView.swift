@@ -28,10 +28,18 @@ struct DiskUsageView: View {
         .confirmationDialog("Move to Trash?",
                             isPresented: Binding(get: { model.pendingTrash != nil }, set: { if !$0 { model.pendingTrash = nil } }),
                             presenting: model.pendingTrash) { pending in
-            Button("Move “\(pending.item.name)” to Trash", role: .destructive) { model.confirmTrash(pending) }
+            Button(pending.items.count == 1 ? "Move “\(pending.items[0].name)” to Trash" : "Move \(pending.items.count) Items to Trash",
+                   role: .destructive) { model.confirmTrash(pending) }
             Button("Cancel", role: .cancel) {}
         } message: { pending in
-            Text("\(pending.item.path)\n\(pending.item.size.formatted(.byteCount(style: .file)))\(pending.item.isDirectory ? " in \(pending.item.fileCount.formatted()) files" : "")\n\nIt goes to the Trash, where you can restore it until you empty the Trash.")
+            if pending.items.count == 1, let item = pending.items.first {
+                Text("\(item.path)\n\(item.size.formatted(.byteCount(style: .file)))\(item.isDirectory ? " in \(item.fileCount.formatted()) files" : "")\n\nIt goes to the Trash, where you can restore it until you empty the Trash.")
+            } else {
+                Text("\(pending.items.count) items, \(pending.size.formatted(.byteCount(style: .file)))\n\n"
+                     + pending.items.prefix(8).map { "• " + $0.path.replacingOccurrences(of: AppPaths.home.path, with: "~") }.joined(separator: "\n")
+                     + (pending.items.count > 8 ? "\n…and \(pending.items.count - 8) more" : "")
+                     + "\n\nThey go to the Trash, where you can restore them until you empty the Trash.")
+            }
         }
         .sheet(isPresented: $model.showingCleanupSheet) { CleanupSheet() }
         .confirmationDialog("Move all to Trash?",
@@ -244,35 +252,97 @@ struct DiskItemList: View {
     /// Size that a full-width bar stands for.
     let scale: Int64
     let showFolder: Bool
-    @State private var selection: DiskItem.ID?
+    @State private var selection = Set<DiskItem.ID>()
 
     var body: some View {
         let model = state.diskUsage
-        List(selection: $selection) {
-            ForEach(items) { item in
-                DiskItemRow(item: item, fraction: Double(item.size) / Double(scale), showFolder: showFolder)
-                    .tag(item.id)
-                    .contextMenu {
-                        if item.isDirectory && !item.isAggregate {
-                            Button("Open") { model.open(item) }
-                        }
-                        Button("Reveal in Finder") { model.reveal(item) }
-                        if !item.isAggregate {
-                            Button("Copy Path") { model.copyPath(item) }
-                            Divider()
-                            Button("Move to Trash…", role: .destructive) { model.requestTrash(item) }
-                                .disabled(model.trashRefusal(item) != nil)
-                        }
-                    }
+        // Items that are still listed (a moved item drops out of the list and the selection).
+        let picked = items.filter { selection.contains($0.id) }
+        VStack(spacing: 0) {
+            List(selection: $selection) {
+                ForEach(items) { item in
+                    DiskItemRow(item: item, fraction: Double(item.size) / Double(scale), showFolder: showFolder)
+                        .tag(item.id)
+                }
+            }
+            .contextMenu(forSelectionType: DiskItem.ID.self) { ids in
+                menu(for: items.filter { ids.contains($0.id) }, model: model)
+            } primaryAction: { ids in
+                guard ids.count == 1, let id = ids.first, let item = items.first(where: { $0.id == id }) else { return }
+                if item.isDirectory && !item.isAggregate { model.open(item) } else { model.reveal(item) }
+            }
+            .overlay {
+                if items.isEmpty { ContentUnavailableView("Empty", systemImage: "folder", description: Text("Nothing here takes up space.")) }
+            }
+            if picked.count > 1 {
+                SelectionBar(items: picked, movable: model.movable(picked).count) {
+                    model.requestTrash(picked)
+                } clear: {
+                    selection.removeAll()
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .contextMenu(forSelectionType: DiskItem.ID.self) { _ in } primaryAction: { ids in
-            guard let id = ids.first, let item = items.first(where: { $0.id == id }) else { return }
-            if item.isDirectory && !item.isAggregate { model.open(item) } else { model.reveal(item) }
+        .animation(.snappy(duration: 0.2), value: picked.count > 1)
+        .onChange(of: items.map(\.id)) { _, ids in
+            selection.formIntersection(ids)
         }
-        .overlay {
-            if items.isEmpty { ContentUnavailableView("Empty", systemImage: "folder", description: Text("Nothing here takes up space.")) }
+    }
+
+    @ViewBuilder
+    private func menu(for picked: [DiskItem], model: DiskUsageModel) -> some View {
+        if picked.count == 1, let item = picked.first {
+            if item.isDirectory && !item.isAggregate {
+                Button("Open") { model.open(item) }
+            }
+            Button("Reveal in Finder") { model.reveal(item) }
+            if !item.isAggregate {
+                Button("Copy Path") { model.copyPath(item) }
+                Divider()
+                Button("Move to Trash…", role: .destructive) { model.requestTrash(item) }
+                    .disabled(model.trashRefusal(item) != nil)
+            }
+        } else if picked.count > 1 {
+            let movable = model.movable(picked)
+            Button("Reveal in Finder") { picked.filter { !$0.isAggregate }.forEach(model.reveal) }
+            Divider()
+            Button("Move \(movable.count) Items to Trash…", role: .destructive) { model.requestTrash(picked) }
+                .disabled(movable.isEmpty)
         }
+    }
+}
+
+/// Shown under a list when several rows are selected: their total size and one Move to Trash button.
+private struct SelectionBar: View {
+    let items: [DiskItem]
+    let movable: Int
+    let trash: () -> Void
+    let clear: () -> Void
+
+    var body: some View {
+        let total = items.reduce(Int64(0)) { $0 + $1.size }
+        HStack(spacing: 12) {
+            IconTile(symbol: "checklist", color: .orange, size: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(items.count) selected · \(total.formatted(.byteCount(style: .file)))").font(.headline).monospacedDigit()
+                if movable < items.count {
+                    Text("\(items.count - movable) can't be moved (system or standard folders)").font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text("⌘-click or ⇧-click to change the selection").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Button("Clear", action: clear).buttonStyle(.glass)
+            Button(role: .destructive, action: trash) {
+                Label("Move \(movable) to Trash…", systemImage: "trash")
+            }
+            .buttonStyle(.glassProminent)
+            .tint(.red)
+            .disabled(movable == 0)
+        }
+        .padding(12)
+        .glassCard(tint: .orange, radius: 16)
+        .padding(10)
     }
 }
 

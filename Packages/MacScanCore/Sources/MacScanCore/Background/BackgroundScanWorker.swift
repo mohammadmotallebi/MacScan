@@ -6,11 +6,14 @@ public struct BackgroundNotification: Sendable, Equatable {
     public var body: String
     /// The scan to open when the notification is clicked.
     public var sessionID: UUID?
+    /// Or the app section to open, e.g. "battery".
+    public var section: String?
 
-    public init(title: String, body: String, sessionID: UUID? = nil) {
+    public init(title: String, body: String, sessionID: UUID? = nil, section: String? = nil) {
         self.title = title
         self.body = body
         self.sessionID = sessionID
+        self.section = section
     }
 }
 
@@ -128,6 +131,12 @@ public enum BackgroundScanWorker {
         }
         guard let trigger = ScanTrigger(rawValue: argument) else { return 64 }
 
+        // A quick look, not a scan: it doesn't wait for (or block) the scan lock.
+        if trigger == .battery {
+            wait { await runBatteryWatch(settings: SettingsStore.load(), notifier: notifier) }
+            return 0
+        }
+
         // One background scan at a time: a second worker waits here until the first is done.
         let lock = open(AppPaths.backgroundLockFile.path, O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
         if lock >= 0 { flock(lock, LOCK_EX) }
@@ -165,9 +174,43 @@ public enum BackgroundScanWorker {
         case .downloads: await runDownloads(env)
         case .startupItems: await runStartupWatch(env)
         case .newApps: await runNewApps(env)
+        case .battery: [ScanSession]()
         }
+        if trigger == .battery { return sessions }
         env.status.record(trigger, status(for: trigger, sessions: sessions, settings: env.settings))
         return sessions
+    }
+
+    // MARK: - Battery watch
+
+    /// Measures energy use and alerts about apps that stayed High on battery. Saves nothing to History.
+    static func runBatteryWatch(settings: ScanSettings, notifier: any BackgroundNotifying,
+                                read: @Sendable () async -> BatteryReport = { await BatteryScanner().scan() },
+                                watcher: BatteryWatcher = BatteryWatcher(),
+                                status: BackgroundStatusStore = BackgroundStatusStore(),
+                                logger: FileLogger = .shared, now: Date = Date()) async {
+        guard settings.watchBattery else {
+            status.record(.battery, BackgroundRunStatus(date: now, summary: "Skipped: turned off"))
+            return
+        }
+        let report = await read()
+        let alerts = watcher.check(report, now: now)
+        for app in alerts {
+            logger.info("Battery watch: \(app.name) used a lot of energy (\(Int(app.impact)))")
+            await notifier.notify(BackgroundNotification(title: "Using a lot of battery", body: BatteryWatcher.message(for: app), section: "battery"))
+        }
+        let summary: String
+        if let problem = report.problem {
+            summary = problem
+        } else if !report.state.onBattery {
+            summary = "Plugged in, nothing to watch"
+        } else if !alerts.isEmpty {
+            summary = "Alerted: " + alerts.map(\.name).joined(separator: ", ")
+        } else {
+            let heavy = report.apps.filter { !$0.isSystem && $0.level == .high }.map(\.name)
+            summary = heavy.isEmpty ? "On battery, nothing heavy" : "Heavy now: " + heavy.prefix(2).joined(separator: ", ")
+        }
+        status.record(.battery, BackgroundRunStatus(date: now, summary: summary, noteworthy: !alerts.isEmpty))
     }
 
     // MARK: - Scheduled scan
@@ -272,9 +315,34 @@ public enum BackgroundScanWorker {
         }
         guard let tracker = env.startupTracker else { return [] }
         try? await Task.sleep(for: env.startupSettle)
-        var session = await env.coordinator.run(targets: [.startupItems]) { _ in }
+
+        // 1. A quick look at the folders. If only MacScan's own agents changed, stop here.
+        let locations = env.coordinator.persistenceLocations
+        let folders = [locations.user("Library/LaunchAgents"), locations.system("Library/LaunchAgents"), locations.system("Library/LaunchDaemons")]
+        let fingerprint = StartupChangeTracker.fingerprint(of: folders)
+        if let last = tracker.loadFingerprint(), last == fingerprint {
+            env.logger.info("Startup watch: only MacScan's own files changed, no scan")
+            return []
+        }
+
+        // 2. List the startup items without the scan engines and compare with the last scan.
+        var focus: Set<String>?
+        if let inventory = try? PersistenceScanner(locations: locations).collect(),
+           let changed = tracker.changedKeys(in: inventory.snapshot) {
+            let relevant = changed.filter { !($0 as NSString).lastPathComponent.hasPrefix(BackgroundAgent.labelPrefix) }
+            if relevant.isEmpty {
+                tracker.saveFingerprint(fingerprint)
+                env.logger.info("Startup watch: nothing new, no scan")
+                return []
+            }
+            focus = inventory.paths(forKeys: relevant)
+        }
+
+        // 3. Scan only what's new or changed (everything the first time).
+        var session = await env.coordinator.run(targets: [.startupItems], onlyPaths: focus) { _ in }
         session.trigger = .startupItems
         tracker.apply(to: &session)
+        if session.status == .completed { tracker.saveFingerprint(fingerprint) }
         // Only worth keeping when something is new or different (a removed item isn't).
         guard !newStartupItems(in: session).isEmpty else {
             env.logger.info("Startup watch: nothing new")
@@ -366,7 +434,7 @@ public enum BackgroundScanWorker {
         case .newApps: "New or updated app: \(names)" + (flagged.first.map { " · " + $0.reason } ?? "")
         case .startupItems: names
         case .scheduled: previous == nil ? "Scheduled scan: \(names)" : "New since the last scheduled scan: \(names)"
-        case nil: names
+        case .battery, nil: names
         }
         let suffix = startup > 0 && session.trigger != .newApps ? " · \(startup) new or changed startup \(startup == 1 ? "item" : "items")" : ""
         return BackgroundNotification(title: title, body: body + suffix + changeNote, sessionID: session.id)
