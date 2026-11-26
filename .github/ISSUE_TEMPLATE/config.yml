@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Installation help
+    url: https://github.com/mohammadmotallebi/MacScan#download--install
+    about: '"Apple could not verify MacScan" and Full Disk Access are explained in the README.'
+  - name: Report a security vulnerability
+    url: https://github.com/mohammadmotallebi/MacScan/security/advisories/new
+    about: Please report security problems privately.

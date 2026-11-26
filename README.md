@@ -1,6 +1,26 @@
-# MacScan
+<p align="center">
+  <img src="MacScan/Assets.xcassets/AppIcon.appiconset/icon_256x256.png" width="128" height="128" alt="MacScan icon">
+</p>
 
-An **on-demand** malware scanner for your own Mac. By default it runs only when you open it and press a scan button: no launch agents, daemons, login items, menu bar helpers or system extensions. When you quit MacScan, every scan and helper process stops. Scheduled scans and scanning new downloads are optional and off by default (see [Background scans](#background-scans)).
+<h1 align="center">MacScan</h1>
+
+<p align="center">
+  <strong>A free, open-source malware scanner and security checkup for your Mac.</strong><br>
+  Runs only when you ask. Never deletes anything on its own.
+</p>
+
+<p align="center">
+  <a href="https://github.com/mohammadmotallebi/MacScan/releases/latest"><img src="https://img.shields.io/github/v/release/mohammadmotallebi/MacScan?label=download&color=2E7D32" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/macOS-26%2B-1F4E79" alt="macOS 26+">
+  <img src="https://img.shields.io/badge/Apple%20Silicon%20%7C%20Intel-universal-5C6BC0" alt="Universal">
+  <a href="https://github.com/mohammadmotallebi/MacScan/actions/workflows/ci.yml"><img src="https://github.com/mohammadmotallebi/MacScan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/mohammadmotallebi/MacScan?color=lightgrey" alt="MIT License"></a>
+  <a href="https://buymeacoffee.com/mohamadmot5"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
+</p>
+
+---
+
+MacScan is an **on-demand** malware scanner for your own Mac. By default it runs only when you open it and press a scan button: no launch agents, daemons, login items, menu bar helpers or system extensions. When you quit MacScan, every scan and helper process stops. Scheduled scans and scanning new downloads are optional and off by default (see [Background scans](#background-scans)).
 
 - **ClamAV** signature scanning (via Homebrew's `clamscan`)
 - **YARA** rules (via Homebrew's `yara`): a small sample macOS ruleset, your own rules, and **Apple's XProtect rules** that ship with macOS
@@ -23,13 +43,38 @@ MacScan **never deletes or moves anything on its own.**
 
 ---
 
-## Requirements
+## Download & install
 
-- macOS 26 Tahoe or later, Apple Silicon
-- Xcode 16 or later (tested with Xcode 27.1)
-- [Homebrew](https://brew.sh) for ClamAV and YARA (optional; the other engines work without them)
+**Requirements:** macOS 26 Tahoe or newer, on an Apple Silicon or Intel Mac.
+[Homebrew](https://brew.sh) is optional, for the ClamAV and YARA engines.
 
-## 1. Install ClamAV and YARA
+1. Download `MacScan-<version>.dmg` from the [Releases](../../releases/latest) page.
+2. Open the DMG and drag **MacScan** onto the **Applications** folder.
+3. Open MacScan from Applications. The first launch is blocked; see below.
+
+### First launch: "Apple could not verify MacScan"
+
+MacScan is free and isn't notarized by Apple, so macOS blocks it the first time. To allow it once:
+
+1. Open MacScan and click **Done** (not "Move to Trash") on the warning.
+2. Open **System Settings › Privacy & Security** and scroll down to Security.
+3. Next to "MacScan was blocked…", click **Open Anyway** and confirm with your password or Touch ID.
+
+On macOS 15 and newer, right-clicking the app and choosing Open no longer gets past this warning.
+If you prefer the Terminal: `xattr -dr com.apple.quarantine /Applications/MacScan.app`
+
+The downloads are ad-hoc signed: they carry no developer certificate, so macOS treats each new
+version as a new app. After an update, turn **Full Disk Access** on again for MacScan ([step 2](#2-grant-full-disk-access)),
+and allow Keychain access if it asks about your VirusTotal key. MacScan's own App integrity check
+lists itself as ad-hoc signed for the same reason. Don't trust a binary? Build it yourself from
+this source ([Build from source](#build-from-source)).
+
+### Uninstall
+
+Turn off any background scans in **Settings › Background** first, then quit MacScan and move
+`/Applications/MacScan.app` to the Trash. Its data lives in `~/Library/Application Support/MacScan`.
+
+## 1. Optional: install ClamAV and YARA
 
 ```sh
 brew install clamav yara
@@ -43,36 +88,7 @@ You do **not** need to configure Homebrew's `freshclam.conf`. MacScan keeps its 
 MacScan looks for the tools in `/opt/homebrew/bin`, `/usr/local/bin` and `/opt/local/bin`. You can set
 custom paths in **Settings › Engines**.
 
-## 2. Build and sign with your free personal team
-
-1. Open `MacScan.xcodeproj` in Xcode.
-2. Select the **MacScan** target › **Signing & Capabilities**.
-3. Keep **Automatically manage signing** on and choose your **Personal Team** under *Team*.
-4. If Xcode says the bundle identifier is unavailable, change `com.local.MacScan` to something unique,
-   e.g. `com.<yourname>.MacScan`.
-5. Press **⌘R** to build and run.
-
-MacScan uses **no App Sandbox and no restricted entitlements** (only the Hardened Runtime), so a free
-personal team is enough.
-
-### Install a copy in /Applications (recommended)
-
-Full Disk Access is granted per app, and the copy Xcode runs lives deep inside DerivedData. To get a
-stable copy, use **Product › Show Build Folder in Finder** › `Products/Debug/MacScan.app` and drag it to
-`/Applications`. Or build Release from the command line:
-
-```sh
-xcodebuild -project MacScan.xcodeproj -scheme MacScan -configuration Release \
-  -derivedDataPath build DEVELOPMENT_TEAM=<YOUR_TEAM_ID> build
-cp -R build/Build/Products/Release/MacScan.app /Applications/
-```
-
-(Your team ID is shown in Xcode › Settings › Accounts, or in the *Team* field of the project.)
-
-Keep signing with the same team and bundle identifier. macOS then recognizes rebuilt copies as the
-same app, and Full Disk Access and the Keychain item keep working.
-
-## 3. Grant Full Disk Access
+## 2. Grant Full Disk Access
 
 Without it, MacScan can still scan your Applications and most of your files, but macOS blocks
 protected locations (Mail, Messages, Safari, other apps' containers). When that happens MacScan lists
@@ -87,7 +103,7 @@ the unreadable paths and walks you through this:
 Child processes MacScan starts (`clamscan`, `yara`, `codesign`) inherit its access.
 For Desktop, Documents and Downloads, macOS may instead show a one-time consent prompt the first time you scan them.
 
-## 4. First run
+## 3. First run
 
 1. On the home screen, click the **Engines** card and then **Update virus database** (the first
    download takes a few minutes).
@@ -545,6 +561,48 @@ agents. Otherwise there is nothing else to remove.
 
 ## Development
 
+### Build from source
+
+Requirements: macOS 26 and Xcode 26 or newer (tested with Xcode 27.1).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+1. Open `MacScan.xcodeproj` in Xcode.
+2. Select the **MacScan** target › **Signing & Capabilities**.
+3. Keep **Automatically manage signing** on and choose your **Personal Team** under *Team*.
+4. If Xcode says the bundle identifier is unavailable, change `com.local.MacScan` to something unique,
+   e.g. `com.<yourname>.MacScan`.
+5. Press **⌘R** to build and run.
+
+MacScan uses **no App Sandbox and no restricted entitlements** (only the Hardened Runtime), so a free
+personal team is enough.
+
+#### Install your build in /Applications
+
+Full Disk Access is granted per app, and the copy Xcode runs lives deep inside DerivedData. To get a
+stable copy, use **Product › Show Build Folder in Finder** › `Products/Debug/MacScan.app` and drag it to
+`/Applications`. Or build Release from the command line:
+
+```sh
+xcodebuild -project MacScan.xcodeproj -scheme MacScan -configuration Release \
+  -derivedDataPath build DEVELOPMENT_TEAM=<YOUR_TEAM_ID> build
+cp -R build/Build/Products/Release/MacScan.app /Applications/
+```
+
+(Your team ID is shown in Xcode › Settings › Accounts, or in the *Team* field of the project.)
+
+Keep signing with the same team and bundle identifier. macOS then recognizes rebuilt copies as the
+same app, and Full Disk Access and the Keychain item keep working.
+
+### Release builds
+
+```sh
+scripts/release.sh   # universal Release build, ad-hoc signed, Hardened Runtime → build/MacScan-<version>.dmg
+```
+
+With `DEVELOPER_ID=<identity>` it signs with a Developer ID certificate instead, and with
+`NOTARY_PROFILE=<profile>` it also notarizes and staples the DMG. The version comes from
+`MARKETING_VERSION` in the Xcode project.
+
 ### Project layout
 
 ```
@@ -630,3 +688,26 @@ add a case to `EngineID` and register the engine in `EngineFactory.makeEngines`.
   not a guarantee.
 - `clamscan` loads the full signature database into memory (≈1 GB+) for the duration of a scan.
 - `codesign --deep` on very large apps (e.g. Xcode) can take minutes.
+
+## Support MacScan
+
+MacScan is free and open source, built in my spare time. If it helped you keep your Mac clean,
+you can buy me a coffee. It helps me keep improving it. Thank you! ☕
+
+<a href="https://buymeacoffee.com/mohamadmot5"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" height="48"></a>
+
+Not in a position to donate? A ⭐ on GitHub, a bug report or telling a friend helps just as much.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+MacScan is released under the [MIT License](LICENSE).
+
+## Credits
+
+- [ClamAV](https://www.clamav.net) and [YARA](https://virustotal.github.io/yara/) are separate tools you install with Homebrew; MacScan runs them, it doesn't include them.
+- XProtect rules belong to Apple and are read from your own macOS installation.
+- App icon: "Security Antivirus" from SVG Repo, CC0 (public domain); see `Config/AppIcon/README.md`.
