@@ -563,7 +563,7 @@ agents. Otherwise there is nothing else to remove.
 
 ### Build from source
 
-Requirements: macOS 26 and Xcode 26 or newer (tested with Xcode 27.1).
+Requirements: macOS 26 and Xcode 27 or newer (the menu bar code uses the macOS 27 SDK).
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 1. Open `MacScan.xcodeproj` in Xcode.

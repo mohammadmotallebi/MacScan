@@ -14,7 +14,7 @@ attaching them: they contain file paths from your Mac.
 
 ## Development setup
 
-Requirements: macOS 26 and Xcode 26 or newer. [Homebrew](https://brew.sh) with `clamav` and `yara` is
+Requirements: macOS 26 and Xcode 27 or newer (the menu bar code uses the macOS 27 SDK). [Homebrew](https://brew.sh) with `clamav` and `yara` is
 needed for the engine tests; those tests skip themselves when the tools are missing.
 
 ```sh

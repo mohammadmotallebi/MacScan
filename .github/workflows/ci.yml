@@ -10,8 +10,13 @@ jobs:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
-      - name: Toolchain
-        run: xcodebuild -version && swift --version
+      - name: Select the newest Xcode (needs Xcode 27 for the macOS 27 SDK)
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE="$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)"
+          [ -n "$XCODE" ] || { echo "::error::Xcode 27 is not installed on this runner"; exit 1; }
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version && swift --version
       - name: Test MacScanCore
         working-directory: Packages/MacScanCore
         # Skipped on CI only: timing checks that hosted runners are too slow for, and signer tests
